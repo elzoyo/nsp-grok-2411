@@ -69,7 +69,7 @@ def test_viewer_cannot_create_lsp():
         ctx,
         "mpls lsp create name=lsp-x from=PE-BAIRES-01 to=PE-CORDOBA-01",
     )
-    assert "permission denied" in out.error
+    assert "permiso denegado" in out.error
 
 
 def test_alarm_ack():
@@ -84,7 +84,7 @@ def test_alarm_ack():
 def test_unknown_command():
     ctx = _admin_ctx()
     out = dispatch(ctx, "blargh")
-    assert "unknown command" in out.error
+    assert "comando desconocido" in out.error
 
 
 def test_find_baires():
@@ -163,8 +163,24 @@ def test_live_customer_unexpected_quits():
     assert "socket exploded" in out.error
 
 
+def test_help_is_spanish():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "help")
+    assert out.error == ""
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=120, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "En cualquier contexto" in text
+    assert "Comandos con /" in text
+    assert "serviceId" in text
+    assert "esta ayuda" in text
+
+
 def test_unknown_command_does_not_quit():
     ctx = _admin_ctx()
     out = dispatch(ctx, "blargh")
     assert out.quit is False
-    assert "unknown command" in out.error
+    assert "comando desconocido" in out.error

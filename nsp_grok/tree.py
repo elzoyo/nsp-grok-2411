@@ -43,7 +43,7 @@ def build_tree(store: Store, user: User) -> Node:
         groups.setdefault(ne.group, {})[ne.name] = _ne_node(ne, store)
 
     group_nodes = {
-        gname: _folder(gname, f"equipment-group {gname}", **children)
+        gname: _folder(gname, f"grupo de equipo {gname}", **children)
         for gname, children in sorted(groups.items())
     }
 
@@ -81,7 +81,7 @@ def build_tree(store: Store, user: User) -> Node:
         admin_kids = {
             "users": _folder(
                 "users",
-                "local users",
+                "usuarios locales",
                 **{
                     u.username: _leaf(u.username, "user", u, u.role)
                     for u in store.users.values()
@@ -96,21 +96,21 @@ def build_tree(store: Store, user: User) -> Node:
 
     root = _folder(
         "/",
-        "NFM-P managed domain",
+        "Dominio gestionado NFM-P",
         customers=_folder("customers", "subscr.Subscriber", **customer_nodes),
-        equipment=_folder("equipment", "Equipment view", **group_nodes),
-        routing=_folder("routing", "Routing view", **routing_kids),
+        equipment=_folder("equipment", "Vista de equipos", **group_nodes),
+        routing=_folder("routing", "Vista de ruteo", **routing_kids),
         mpls=_folder(
             "mpls",
             "MPLS",
             lsps=_folder("lsps", "LSPs", **lsp_kids),
-            paths=_folder("paths", "MPLS paths", **path_kids),
-            interfaces=_folder("interfaces", "MPLS interfaces", **if_kids),
-            tunnels=_folder("tunnels", "Service tunnels (SDP)", **tun_kids),
+            paths=_folder("paths", "Paths MPLS", **path_kids),
+            interfaces=_folder("interfaces", "Interfaces MPLS", **if_kids),
+            tunnels=_folder("tunnels", "Túneles de servicio (SDP)", **tun_kids),
         ),
-        alarms=_folder("alarms", "Faults", **alarm_kids),
-        stats=_folder("stats", "Statistics"),
-        admin=_folder("admin", "Users and Security", **admin_kids),
+        alarms=_folder("alarms", "Fallas", **alarm_kids),
+        stats=_folder("stats", "Estadísticas"),
+        admin=_folder("admin", "Usuarios y seguridad", **admin_kids),
     )
     return root
 
@@ -152,7 +152,7 @@ def _service_node(svc, store: Store, user: User) -> Node:
             site.ne,
             site,
             {
-                "saps": _folder("saps", "access interfaces", **sap_kids),
+                "saps": _folder("saps", "interfaces de acceso", **sap_kids),
                 "sdp-bindings": _folder("sdp-bindings", "", **bind_kids),
             },
         )
@@ -221,12 +221,12 @@ def _service_node(svc, store: Store, user: User) -> Node:
         f"{svc.svc_type} {svc.name}",
         svc,
         {
-            "sites": _folder("sites", "service sites", **site_kids),
-            "saps": _folder("saps", "access interfaces", **sap_all),
-            "sdp-bindings": _folder("sdp-bindings", "spoke/mesh SDP", **bind_all),
+            "sites": _folder("sites", "sites del servicio", **site_kids),
+            "saps": _folder("saps", "interfaces de acceso", **sap_all),
+            "sdp-bindings": _folder("sdp-bindings", "SDP spoke/mesh", **bind_all),
             "tunnels": _folder("tunnels", "svt.Tunnel", **tun_kids),
-            "lsps": _folder("lsps", "transport LSPs", **lsp_kids),
-            "alarms": _folder("alarms", "faults on this service", **alarm_kids),
+            "lsps": _folder("lsps", "LSPs de transporte", **lsp_kids),
+            "alarms": _folder("alarms", "alarmas de este servicio", **alarm_kids),
             **extra,
         },
     )
@@ -252,7 +252,7 @@ def _ne_node(ne, store: Store) -> Node:
         f"{ne.ne_type} {ne.system_ip}",
         ne,
         {
-            "cards": _folder("cards", "shelf / cards", **cards),
+            "cards": _folder("cards", "shelf / tarjetas", **cards),
             "routing": _routing_node(ne, store, "Base"),
         },
     )
@@ -278,7 +278,7 @@ def _routing_node(ne, store: Store, name: str = "Base") -> Node:
     return Node(
         name,
         "vrtr",
-        "Base routing instance",
+        "Instancia de ruteo Base",
         ne,
         proto_kids,
     )

@@ -58,7 +58,7 @@ def _toolbar(ctx: Ctx) -> StyleAndTextTuples:
     crit = sum(1 for a in alarms if a.severity == "critical")
     major = sum(1 for a in alarms if a.severity == "major")
     alarm_style = "class:bt-bad" if crit else ("class:bt-key" if major else "class:bt-ok")
-    alarm_txt = f"{crit} crit · {major} maj"
+    alarm_txt = f"{crit} crít · {major} may"
     return [
         ("class:bt-key", f" {ctx.user.username} "),
         ("class:bottom-toolbar", "│"),
@@ -113,7 +113,7 @@ def _user_for_session(store: Store, username: str, password: str, live: bool) ->
         existing = store.users.get(username.strip().lower())
         if existing is not None:
             if existing.state != "active":
-                return None, "Account is suspended."
+                return None, "La cuenta está suspendida."
             existing.last_login = datetime.now(timezone.utc)
             return existing, ""
         digest, salt = hash_password(password)
@@ -142,10 +142,10 @@ def login_interactive(
     )
     for _ in range(5):
         try:
-            username = console.input("[cyan]user[/] › ").strip()
+            username = console.input("[cyan]usuario[/] › ").strip()
             if not username:
                 continue
-            password = getpass.getpass("password › ")
+            password = getpass.getpass("contraseña › ")
         except EOFError as exc:
             raise UserCancelled("Login cancelado (EOF).") from exc
         except KeyboardInterrupt as exc:
@@ -156,7 +156,7 @@ def login_interactive(
         if user:
             return user, client if live else None, live
         console.print(Text(err, style="bold red"))
-    console.print("[red]too many failed login attempts[/]")
+    console.print("[red]Demasiados intentos de login fallidos.[/]")
     return None, None, False
 
 
@@ -179,7 +179,7 @@ def session_intro(ctx: Ctx) -> None:
     console.print()
     console.print(
         Text.assemble(
-            ("session  ", "dim"),
+            ("sesión  ", "dim"),
             (ctx.session_id, "bold cyan"),
             ("  ·  ", "dim"),
             (ctx.user.username, "bold"),
@@ -193,22 +193,23 @@ def session_intro(ctx: Ctx) -> None:
     services = ctx.store.visible_services(ctx.user)
     console.print(
         Text.assemble(
-            (f"{len(customers)} customers", ""),
+            (f"{len(customers)} clientes", ""),
             ("  ·  ", "dim"),
-            (f"{len(services)} services (VPRN/VPLS/Epipe)", ""),
+            (f"{len(services)} servicios (VPRN/VPLS/Epipe)", ""),
             ("  ·  ", "dim"),
             (f"{len(visible)} NEs", ""),
             ("  ·  ", "dim"),
-            (f"{len(alarms)} alarms", SEV_STYLE["critical"] if crit else ""),
+            (f"{len(alarms)} alarmas", SEV_STYLE["critical"] if crit else ""),
         )
     )
-    backend = "NSP live" if ctx.live else "lab local"
+    backend = "NSP en vivo" if ctx.live else "lab local"
     console.print(
         Text.from_markup(
             f"[dim]Prompt [bold cyan]{ctx.user.username}@{ctx.nsp_host}>[/]  "
             f"backend [bold]{backend}[/].  "
-            "type [bold cyan]customers[/] then [bold cyan]12[/].  "
-            "[bold cyan]--debug[/] imprime cada HTTP request.[/]\n"
+            "Escribí [bold cyan]customers[/] y después [bold cyan]12[/].  "
+            "[bold cyan]help[/] lista comandos.  "
+            "[bold cyan]--debug[/] imprime cada petición HTTP.[/]\n"
         )
     )
 
@@ -328,35 +329,36 @@ def build_ctx(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="nsp-grok",
-        description=f"{PRODUCT} {RELEASE} — NFM-P classic management shell",
+        description=f"{PRODUCT} {RELEASE} — shell de gestión clásica NFM-P",
     )
-    p.add_argument("--user", "-u", help="username (skip interactive login)")
-    p.add_argument("--password", "-p", help="password (or NSP_GROK_PASSWORD env)")
+    p._optionals.title = "opciones"
+    p.add_argument("--user", "-u", help="usuario (omite el login interactivo)")
+    p.add_argument("--password", "-p", help="contraseña (o variable NSP_GROK_PASSWORD)")
     p.add_argument(
         "--host",
         default=os.environ.get("NSP_HOST", DEFAULT_NSP_HOST),
-        help="NSP IP/host shown in the prompt (user@host>)",
+        help="IP/host del NSP en el prompt (user@host>)",
     )
     p.add_argument(
         "--batch",
         "-c",
         action="append",
         default=[],
-        help="run a command non-interactively (repeatable)",
+        help="ejecuta un comando sin REPL (repetible)",
     )
     p.add_argument(
         "--script",
-        help="file with one command per line",
+        help="archivo con un comando por línea",
     )
     p.add_argument(
         "--debug",
         action="store_true",
-        help="imprime cada HTTP request (método, URL, headers redactados, body)",
+        help="imprime cada petición HTTP (método, URL, headers redactados, body)",
     )
     p.add_argument(
         "--offline",
         action="store_true",
-        help="no contactar el NSP; usar inventario local",
+        help="no contactar el NSP; usar inventario local (lab)",
     )
     return p.parse_args(argv)
 

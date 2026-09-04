@@ -51,19 +51,19 @@ def check_password_policy(username: str, password: str, email: str = "") -> list
     errors: list[str] = []
     p = PASSWORD_POLICY
     if len(password) < p["min_length"]:
-        errors.append(f"minimum length is {p['min_length']}")
+        errors.append(f"longitud mínima: {p['min_length']} caracteres")
     if sum(c.isupper() for c in password) < p["uppercase"]:
-        errors.append("at least one uppercase letter required")
+        errors.append("se requiere al menos una mayúscula")
     if sum(c.islower() for c in password) < p["lowercase"]:
-        errors.append("at least one lowercase letter required")
+        errors.append("se requiere al menos una minúscula")
     if sum(c.isdigit() for c in password) < p["digits"]:
-        errors.append("at least one digit required")
+        errors.append("se requiere al menos un dígito")
     if sum(c in p["special_chars"] for c in password) < p["special"]:
-        errors.append(f"at least one special character required ({p['special_chars']})")
+        errors.append(f"se requiere al menos un carácter especial ({p['special_chars']})")
     if p["must_not_be_username"] and password.lower() == username.lower():
-        errors.append("password must not equal the username")
+        errors.append("la contraseña no puede ser igual al usuario")
     if email and password.lower() == email.lower():
-        errors.append("password must not equal the e-mail address")
+        errors.append("la contraseña no puede ser igual al correo")
     return errors
 
 
@@ -72,22 +72,22 @@ def authenticate(users: dict[str, User], username: str, password: str) -> tuple[
     key = username.strip().lower()
     user = users.get(key)
     if user is None:
-        return None, "Invalid username or password."
+        return None, "Usuario o contraseña incorrectos."
     if user.state != "active":
-        return None, "Account is suspended."
+        return None, "La cuenta está suspendida."
     if user.locked_until and user.locked_until > _now():
         remaining = int((user.locked_until - _now()).total_seconds() // 60) + 1
-        return None, f"Account locked. Retry in {remaining} min."
+        return None, f"Cuenta bloqueada. Reintentar en {remaining} min."
     if not verify_password(user, password):
         user.failed_logins += 1
         if user.failed_logins >= MAX_FAILED:
             user.locked_until = _now() + timedelta(minutes=LOCK_MINUTES)
             return None, (
-                f"Account locked after {MAX_FAILED} failed attempts "
+                f"Cuenta bloqueada tras {MAX_FAILED} intentos fallidos "
                 f"({LOCK_MINUTES} min)."
             )
         left = MAX_FAILED - user.failed_logins
-        return None, f"Invalid username or password. {left} attempt(s) remaining."
+        return None, f"Usuario o contraseña incorrectos. Quedan {left} intento(s)."
     user.failed_logins = 0
     user.locked_until = None
     user.last_login = _now()
@@ -96,12 +96,12 @@ def authenticate(users: dict[str, User], username: str, password: str) -> tuple[
 
 def change_password(user: User, current: str, new: str) -> list[str]:
     if not verify_password(user, current):
-        return ["current password is incorrect"]
+        return ["la contraseña actual es incorrecta"]
     errors = check_password_policy(user.username, new, user.email)
     new_hash, _ = hash_password(new, user.salt)
     if new_hash in user.password_history[-PASSWORD_POLICY["history"] :]:
         errors.append(
-            f"password must not match the previous {PASSWORD_POLICY['history']} passwords"
+            f"no puede repetir las últimas {PASSWORD_POLICY['history']} contraseñas"
         )
     if errors:
         return errors

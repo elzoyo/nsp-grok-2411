@@ -144,12 +144,12 @@ class NspClient:
         except UserCancelled:
             raise
         except requests.Timeout as exc:
-            self.debug.emit(f"<<< timeout after {self.timeout}s: {exc}")
+            self.debug.emit(f"<<< timeout tras {self.timeout}s: {exc}")
             raise NspApiError(
                 f"timeout de {self.timeout[1]:.0f}s al consultar {url}"
             ) from exc
         except requests.RequestException as exc:
-            self.debug.emit(f"<<< transport error: {exc}")
+            self.debug.emit(f"<<< error de transporte: {exc}")
             raise NspApiError(f"no se pudo contactar {url}: {exc}") from exc
         except Exception as exc:
             self.debug.emit(f"<<< error: {type(exc).__name__}: {exc}")

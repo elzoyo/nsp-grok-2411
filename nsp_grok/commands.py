@@ -22,25 +22,25 @@ DEFAULT_NSP_HOST = "172.24.80.28"
 
 
 SLASH = {
-    "help": "this help",
-    "customers": "list subscribers",
-    "customer": "show a subscriber",
+    "help": "esta ayuda",
+    "customers": "lista de clientes (subscr.Subscriber)",
+    "customer": "muestra un cliente",
     "services": "VPRN / VPLS / Epipe",
-    "status": "session summary",
-    "whoami": "user, role, span of control",
-    "ne": "network elements",
-    "mpls": "MPLS objects",
-    "alarms": "faults",
-    "stats": "performance statistics",
-    "topology": "ASCII topology",
-    "tasks": "task manager",
-    "users": "local users (admin)",
-    "resync": "resynchronize NE(s)",
-    "passwd": "change password",
-    "clear": "clear screen",
-    "quit": "end session",
-    "logout": "end session",
-    "debug": "print HTTP requests",
+    "status": "resumen de sesión",
+    "whoami": "usuario, rol, span of control",
+    "ne": "elementos de red",
+    "mpls": "objetos MPLS",
+    "alarms": "fallas",
+    "stats": "estadísticas de performance",
+    "topology": "topología ASCII",
+    "tasks": "gestor de tareas",
+    "users": "usuarios locales (admin)",
+    "resync": "resincroniza NE(s)",
+    "passwd": "cambia la contraseña",
+    "clear": "limpia la pantalla",
+    "quit": "cierra la sesión",
+    "logout": "cierra la sesión",
+    "debug": "imprime las peticiones HTTP",
 }
 
 
@@ -166,7 +166,7 @@ def _debug(ctx: Ctx, args: list[str]) -> Outcome:
     if ctx.client is not None:
         ctx.client.debug.enabled = ctx.debug
     state = "on" if ctx.debug else "off"
-    live = "live" if ctx.live else "lab (sin HTTP)"
+    live = "NSP en vivo" if ctx.live else "lab (sin HTTP)"
     return Outcome(renderable=Text(f"debug {state}  ·  backend {live}", style="yellow"))
 
 
@@ -228,7 +228,7 @@ def dispatch(ctx: Ctx, line: str) -> Outcome:
         try:
             parts = shlex.split(raw)
         except ValueError as exc:
-            return Outcome(error=str(exc))
+            return Outcome(error=f"línea inválida: {exc}")
         walked = _walk_fire(ctx, parts)
         rest = parts[walked:]
         sync_err = _sync_live(ctx)
@@ -241,8 +241,8 @@ def dispatch(ctx: Ctx, line: str) -> Outcome:
         handlers = _handlers()
         fn = handlers.get(verb)
         if fn is None:
-            hint = "  (try ? or help)" if not ctx.cwd else "  (try ?  ·  exit to go up)"
-            return Outcome(error=f"unknown command: {verb}{hint}")
+            hint = "  (probá ? o help)" if not ctx.cwd else "  (probá ?  ·  exit para subir)"
+            return Outcome(error=f"comando desconocido: {verb}{hint}")
         return fn(ctx, args)
     except UserCancelled:
         raise
@@ -293,7 +293,7 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
     }
     fn = mapping.get(name)
     if fn is None:
-        return Outcome(error=f"unknown command: /{name}  (try /help)")
+        return Outcome(error=f"comando desconocido: /{name}  (probá /help)")
     return fn()
 
 
@@ -301,7 +301,7 @@ def _ls(ctx: Ctx, args: list[str]) -> Outcome:
     spec = args[0] if args else "."
     found = resolve(ctx.root, ctx.cwd, spec)
     if found is None:
-        return Outcome(error=f"no such object: {spec}")
+        return Outcome(error=f"no existe el objeto: {spec}")
     path, node = found
     return Outcome(renderable=render.ls_table(node, path))
 
@@ -310,7 +310,7 @@ def _cd(ctx: Ctx, args: list[str]) -> Outcome:
     spec = args[0] if args else "/"
     found = resolve(ctx.root, ctx.cwd, spec)
     if found is None:
-        return Outcome(error=f"no such object: {spec}")
+        return Outcome(error=f"no existe el objeto: {spec}")
     ctx.cwd = found[0]
     return Outcome()
 
@@ -329,7 +329,7 @@ def _tree(ctx: Ctx, args: list[str]) -> Outcome:
             spec = a
     found = resolve(ctx.root, ctx.cwd, spec)
     if found is None:
-        return Outcome(error=f"no such object: {spec}")
+        return Outcome(error=f"no existe el objeto: {spec}")
     path, node = found
     return Outcome(renderable=render.tree_view(node, path, depth))
 
@@ -340,7 +340,7 @@ def _show(ctx: Ctx, args: list[str]) -> Outcome:
     if found is None:
         obj = _lookup_anywhere(ctx, spec)
         if obj is None:
-            return Outcome(error=f"no such object: {spec}")
+            return Outcome(error=f"no existe el objeto: {spec}")
         kind, payload = obj
         return Outcome(renderable=render.show_object(payload, kind))
     _path, node = found
@@ -351,7 +351,7 @@ def _show(ctx: Ctx, args: list[str]) -> Outcome:
 
 def _find(ctx: Ctx, args: list[str]) -> Outcome:
     if not args:
-        return Outcome(error="usage: find <text>")
+        return Outcome(error="uso: find <texto>")
     needle = " ".join(args).lower()
     hits: list[tuple[str, str, str]] = []
 
@@ -372,17 +372,17 @@ def _find(ctx: Ctx, args: list[str]) -> Outcome:
 
     walk(ctx.root, [])
     if not hits:
-        return Outcome(renderable=Text("no matches", style="dim"))
+        return Outcome(renderable=Text("sin coincidencias", style="dim"))
     from rich.table import Table
 
     t = Table(title=f"find  {needle!r}  ({len(hits)})", border_style="grey37")
-    t.add_column("path", style="cyan")
-    t.add_column("kind")
-    t.add_column("label")
+    t.add_column("ruta", style="cyan")
+    t.add_column("tipo")
+    t.add_column("etiqueta")
     for row in hits[:80]:
         t.add_row(*row)
     if len(hits) > 80:
-        t.caption = f"showing 80 of {len(hits)}"
+        t.caption = f"mostrando 80 de {len(hits)}"
     return Outcome(renderable=t)
 
 
@@ -395,7 +395,7 @@ def _ne(ctx: Ctx, args: list[str]) -> Outcome:
         (n for n in visible.values() if n.system_ip == name), None
     )
     if ne is None:
-        return Outcome(error=f"NE not in span of control: {name}")
+        return Outcome(error=f"NE fuera del span of control: {name}")
     return Outcome(renderable=render.show_ne(ne))
 
 
@@ -408,13 +408,13 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
         if rest:
             path = ctx.store.paths.get(rest[0])
             if path is None:
-                return Outcome(error=f"unknown path: {rest[0]}")
+                return Outcome(error=f"path desconocido: {rest[0]}")
             return Outcome(renderable=render.show_path(path))
         from rich.table import Table
 
-        t = Table(title="MPLS Paths", border_style="grey37")
-        t.add_column("name", style="bold")
-        t.add_column("type")
+        t = Table(title="Paths MPLS", border_style="grey37")
+        t.add_column("nombre", style="bold")
+        t.add_column("tipo")
         t.add_column("hops")
         for p in ctx.store.paths.values():
             t.add_row(p.name, p.hop_type, " → ".join(p.hops) or "(loose)")
@@ -422,9 +422,9 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
     if sub in ("tunnels", "tunnel", "sdp"):
         from rich.table import Table
 
-        t = Table(title="Service tunnels (SDP)", border_style="grey37")
+        t = Table(title="Túneles de servicio (SDP)", border_style="grey37")
         t.add_column("id", justify="right")
-        t.add_column("name")
+        t.add_column("nombre")
         t.add_column("from")
         t.add_column("to")
         t.add_column("sig")
@@ -444,10 +444,10 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
     if sub in ("interfaces", "interface", "if"):
         from rich.table import Table
 
-        t = Table(title="MPLS interfaces", border_style="grey37")
+        t = Table(title="Interfaces MPLS", border_style="grey37")
         t.add_column("NE")
-        t.add_column("name")
-        t.add_column("bound if")
+        t.add_column("nombre")
+        t.add_column("if asociada")
         t.add_column("TE")
         t.add_column("SRLG")
         t.add_column("oper")
@@ -464,7 +464,7 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
                 render.state(iface.oper),
             )
         return Outcome(renderable=t)
-    return Outcome(error="usage: mpls [lsps|paths|tunnels|interfaces]")
+    return Outcome(error="uso: mpls [lsps|paths|tunnels|interfaces]")
 
 
 def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
@@ -474,7 +474,7 @@ def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
     if action == "show" and len(args) >= 2:
         lsp = ctx.store.lsps.get(args[1])
         if lsp is None:
-            return Outcome(error=f"unknown LSP: {args[1]}")
+            return Outcome(error=f"LSP desconocido: {args[1]}")
         return Outcome(renderable=render.show_lsp(lsp))
     if action == "create":
         return _lsp_create(ctx, args[1:])
@@ -484,20 +484,20 @@ def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
         return _lsp_admin(ctx, args[1], "up")
     if action == "delete" and len(args) >= 2:
         if not can(ctx.user, "write"):
-            return Outcome(error="permission denied (write)")
+            return Outcome(error="permiso denegado (write)")
         name = args[1]
         if name not in ctx.store.lsps:
-            return Outcome(error=f"unknown LSP: {name}")
+            return Outcome(error=f"LSP desconocido: {name}")
         del ctx.store.lsps[name]
         _task(ctx, f"delete LSP {name}", f"lsp:{name}")
         ctx.rebuild()
-        return Outcome(renderable=Text(f"deleted {name}", style="green"))
+        return Outcome(renderable=Text(f"eliminado {name}", style="green"))
     # treat first arg as name
     lsp = ctx.store.lsps.get(args[0])
     if lsp:
         return Outcome(renderable=render.show_lsp(lsp))
     return Outcome(
-        error="usage: mpls lsp [list|show <n>|create ...|shutdown <n>|turnup <n>|delete <n>]"
+        error="uso: mpls lsp [list|show <n>|create ...|shutdown <n>|turnup <n>|delete <n>]"
     )
 
 
@@ -512,20 +512,20 @@ def _parse_kv(args: list[str]) -> dict[str, str]:
 
 def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     if not can(ctx.user, "write"):
-        return Outcome(error="permission denied (write)")
+        return Outcome(error="permiso denegado (write)")
     kv = _parse_kv(args)
     name = kv.get("name")
     src = kv.get("from")
     dst = kv.get("to")
     if not name or not src or not dst:
         return Outcome(
-            error="usage: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P]"
+            error="uso: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P]"
         )
     if name in ctx.store.lsps:
-        return Outcome(error=f"LSP already exists: {name}")
+        return Outcome(error=f"el LSP ya existe: {name}")
     visible = ctx.store.visible_nes(ctx.user)
     if src not in visible or dst not in visible:
-        return Outcome(error="source/dest NE not in span of control")
+        return Outcome(error="NE origen/destino fuera del span of control")
     path_name = kv.get("path", "loose-any")
     path = ctx.store.paths.get(path_name)
     hops = path.hops if path else [src, dst]
@@ -543,18 +543,18 @@ def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     ctx.store.lsps[name] = lsp
     _task(ctx, f"create LSP {name}", f"lsp:{name}")
     ctx.rebuild()
-    return Outcome(renderable=Group(Text("created", style="green"), render.show_lsp(lsp)))
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_lsp(lsp)))
 
 
 def _lsp_admin(ctx: Ctx, name: str, admin: str) -> Outcome:
     if not can(ctx.user, "write"):
-        return Outcome(error="permission denied (write)")
+        return Outcome(error="permiso denegado (write)")
     lsp = ctx.store.lsps.get(name)
     if lsp is None:
-        return Outcome(error=f"unknown LSP: {name}")
+        return Outcome(error=f"LSP desconocido: {name}")
     lsp.admin = admin  # type: ignore[assignment]
     lsp.oper = admin  # type: ignore[assignment]
-    verb = "shut down" if admin == "down" else "turned up"
+    verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
     _task(ctx, f"{verb} LSP {name}", f"lsp:{name}")
     return Outcome(renderable=Text(f"{name} {verb}", style="green"))
 
@@ -572,7 +572,7 @@ def _customer(ctx: Ctx, args: list[str]) -> Outcome:
         None,
     )
     if cust is None:
-        return Outcome(error=f"unknown customer: {key}")
+        return Outcome(error=f"cliente desconocido: {key}")
     ctx.cwd = ["customers", str(cust.subscriber_id)]
     err = _sync_live(ctx)
     if err is not None:
@@ -594,12 +594,12 @@ def _service(ctx: Ctx, args: list[str]) -> Outcome:
         # /services 12 → services of customer 12
         cid = int(args[0])
         if cid not in ctx.store.visible_customers(ctx.user):
-            return Outcome(error=f"customer not in span: {cid}")
+            return Outcome(error=f"cliente fuera del span: {cid}")
         return Outcome(renderable=render.service_table(ctx.store.services_of(cid, ctx.user)))
     key = args[0]
     svc = next((s for s in svcs if str(s.svc_id) == key or s.name == key), None)
     if svc is None:
-        return Outcome(error=f"unknown service: {key}")
+        return Outcome(error=f"servicio desconocido: {key}")
     ctx.cwd = ["customers", str(svc.customer_id), svc.svc_type, str(svc.svc_id)]
     return Outcome(renderable=render.show_service(svc))
 
@@ -617,11 +617,11 @@ def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
         return Outcome(renderable=render.alarm_table(alarms))
     if action in ("ack", "acknowledge") and len(args) >= 2:
         if not can(ctx.user, "execute"):
-            return Outcome(error="permission denied (execute) — cannot acknowledge")
+            return Outcome(error="permiso denegado (execute) — no se puede reconocer la alarma")
         return _alarm_mutate(ctx, args[1], ack=True)
     if action == "clear" and len(args) >= 2:
         if not can(ctx.user, "execute"):
-            return Outcome(error="permission denied (execute) — cannot clear")
+            return Outcome(error="permiso denegado (execute) — no se puede limpiar la alarma")
         return _alarm_mutate(ctx, args[1], clear=True)
     if action in ("critical", "major", "minor", "warning"):
         alarms = [a for a in alarms if a.severity == action]
@@ -629,31 +629,31 @@ def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
     alarm = next((a for a in alarms if a.id == args[0]), None)
     if alarm:
         return Outcome(renderable=render.show_alarm(alarm))
-    return Outcome(error="usage: alarm [list|ack <id>|clear <id>|<id>|<severity>]")
+    return Outcome(error="uso: alarm [list|ack <id>|clear <id>|<id>|<severity>]")
 
 
 def _alarm_mutate(ctx: Ctx, alarm_id: str, ack: bool = False, clear: bool = False) -> Outcome:
     alarm = next((a for a in ctx.store.alarms if a.id == alarm_id), None)
     if alarm is None:
-        return Outcome(error=f"unknown alarm: {alarm_id}")
+        return Outcome(error=f"alarma desconocida: {alarm_id}")
     if ack:
         alarm.acked = True
         alarm.acked_by = ctx.user.username
         _task(ctx, f"acknowledge {alarm_id}", alarm.object_fdn)
-        return Outcome(renderable=Text(f"{alarm_id} acknowledged", style="green"))
+        return Outcome(renderable=Text(f"{alarm_id} reconocida", style="green"))
     if clear:
         alarm.cleared = True
         alarm.severity = "cleared"
         _task(ctx, f"clear {alarm_id}", alarm.object_fdn)
         ctx.rebuild()
-        return Outcome(renderable=Text(f"{alarm_id} cleared", style="green"))
+        return Outcome(renderable=Text(f"{alarm_id} limpiada", style="green"))
     return Outcome()
 
 
 def _stats(ctx: Ctx, args: list[str]) -> Outcome:
     if not args:
         return Outcome(
-            error="usage: stats <fdn>   e.g. stats ne:PE-BAIRES-01:port:1/1/1  or  stats lsp:lsp-ba-cba"
+            error="uso: stats <fdn>   ej. stats ne:PE-BAIRES-01:port:1/1/1  o  stats lsp:lsp-ba-cba"
         )
     fdn = args[0]
     return Outcome(renderable=render.stats_table(ctx.store.stats, fdn))
@@ -661,18 +661,18 @@ def _stats(ctx: Ctx, args: list[str]) -> Outcome:
 
 def _resync(ctx: Ctx, args: list[str]) -> Outcome:
     if not can(ctx.user, "write"):
-        return Outcome(error="permission denied (write)")
+        return Outcome(error="permiso denegado (write)")
     visible = ctx.store.visible_nes(ctx.user)
     names = args or list(visible)
     done = []
     for name in names:
         ne = visible.get(name)
         if ne is None:
-            return Outcome(error=f"NE not in span: {name}")
+            return Outcome(error=f"NE fuera del span: {name}")
         ne.management = "managed"
         _task(ctx, f"resync {name}", f"ne:{name}")
         done.append(name)
-    return Outcome(renderable=Text("resynchronized: " + ", ".join(done), style="green"))
+    return Outcome(renderable=Text("resincronizado: " + ", ".join(done), style="green"))
 
 
 def _whoami(ctx: Ctx, args: list[str]) -> Outcome:
@@ -691,46 +691,48 @@ def _status(ctx: Ctx, args: list[str]) -> Outcome:
     vis_cust = ctx.store.visible_customers(ctx.user)
     svc_up = sum(1 for s in vis_svc.values() if s.oper == "up")
     rows = [
-        ("Product", f"NSP-Grok {RELEASE}  NFM-P classic shell"),
-        ("Session", ctx.session_id),
-        ("User", f"{ctx.user.username}  ({ctx.user.role} / {ctx.user.group})"),
+        ("Producto", f"NSP-Grok {RELEASE}  shell clásica NFM-P"),
+        ("Sesión", ctx.session_id),
+        ("Usuario", f"{ctx.user.username}  ({ctx.user.role} / {ctx.user.group})"),
         ("Span of Control", ", ".join(ctx.user.span) or "ALL"),
-        ("CWD", pwd(ctx.cwd)),
-        ("Customers", str(len(vis_cust))),
-        ("Services", f"{svc_up}/{len(vis_svc)} operational  (VPRN/VPLS/Epipe)"),
-        ("NEs", f"{up}/{len(visible)} operational"),
-        ("LSPs", f"{lsp_up}/{len(ctx.store.lsps)} operational"),
+        ("Contexto", pwd(ctx.cwd)),
+        ("Clientes", str(len(vis_cust))),
+        ("Servicios", f"{svc_up}/{len(vis_svc)} operativos  (VPRN/VPLS/Epipe)"),
+        ("NEs", f"{up}/{len(visible)} operativos"),
+        ("LSPs", f"{lsp_up}/{len(ctx.store.lsps)} operativos"),
         (
-            "Alarms",
-            "  ".join(f"{k}={v}" for k, v in counts.items()) or "none outstanding",
+            "Alarmas",
+            "  ".join(f"{k}={v}" for k, v in counts.items()) or "sin pendientes",
         ),
-        ("Started", ctx.started.strftime("%Y-%m-%d %H:%M:%SZ")),
+        ("Inicio", ctx.started.strftime("%Y-%m-%d %H:%M:%SZ")),
+        ("Backend", "NSP en vivo" if ctx.live else "lab local"),
+        ("Debug HTTP", "on" if ctx.debug else "off"),
     ]
-    return Outcome(renderable=render.kv_table(rows, title="Session"))
+    return Outcome(renderable=render.kv_table(rows, title="Sesión"))
 
 
 def _passwd(ctx: Ctx, args: list[str]) -> Outcome:
     if len(args) < 2:
-        return Outcome(error="usage: passwd <current> <new>     (or /passwd)")
+        return Outcome(error="uso: passwd <actual> <nueva>     (o /passwd)")
     errors = change_password(ctx.user, args[0], args[1])
     if errors:
         return Outcome(error="; ".join(errors))
-    return Outcome(renderable=Text("password updated", style="green"))
+    return Outcome(renderable=Text("contraseña actualizada", style="green"))
 
 
 def _users(ctx: Ctx, args: list[str]) -> Outcome:
     if ctx.user.role != "administrator":
-        return Outcome(error="permission denied (administrator role required)")
+        return Outcome(error="permiso denegado (se requiere rol administrator)")
     from rich.table import Table
 
-    t = Table(title="Local users", border_style="grey37")
-    t.add_column("user")
-    t.add_column("group")
-    t.add_column("role")
-    t.add_column("access")
+    t = Table(title="Usuarios locales", border_style="grey37")
+    t.add_column("usuario")
+    t.add_column("grupo")
+    t.add_column("rol")
+    t.add_column("acceso")
     t.add_column("span")
-    t.add_column("state")
-    t.add_column("last login")
+    t.add_column("estado")
+    t.add_column("último login")
     for u in ctx.store.users.values():
         t.add_row(
             u.username,
@@ -747,15 +749,15 @@ def _users(ctx: Ctx, args: list[str]) -> Outcome:
 def _tasks(ctx: Ctx, args: list[str]) -> Outcome:
     from rich.table import Table
 
-    t = Table(title="Task Manager", border_style="grey37")
+    t = Table(title="Gestor de tareas", border_style="grey37")
     t.add_column("id", justify="right")
-    t.add_column("user")
-    t.add_column("operation")
-    t.add_column("object")
-    t.add_column("state")
-    t.add_column("started")
+    t.add_column("usuario")
+    t.add_column("operación")
+    t.add_column("objeto")
+    t.add_column("estado")
+    t.add_column("inicio")
     if not ctx.store.tasks:
-        t.add_row("—", "—", "no tasks this session", "", "", "")
+        t.add_row("—", "—", "sin tareas en esta sesión", "", "", "")
         return Outcome(renderable=t)
     for task in ctx.store.tasks[-20:]:
         t.add_row(

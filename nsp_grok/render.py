@@ -61,7 +61,7 @@ def banner() -> RenderableType:
         ("\n", ""),
         ("Network Functions Manager — Packet", "dim"),
         ("\n", ""),
-        ("Classic management shell  ·  IP/MPLS", "dim"),
+        ("Shell de gestión clásica  ·  IP/MPLS", "dim"),
     )
     return Panel(body, border_style="cyan", padding=(0, 2))
 
@@ -80,16 +80,16 @@ def kv_table(rows: Iterable[tuple[str, Any]], title: str = "") -> Table:
 
 def ls_table(node: Node, path: list[str]) -> RenderableType:
     if not node.children:
-        return Text(f"(empty)  {pwd(path)}", style="dim")
+        return Text(f"(vacío)  {pwd(path)}", style="dim")
     table = Table(
         title=f"{pwd(path)}  [{node.kind}]",
         expand=False,
         border_style="grey37",
     )
-    table.add_column("name", style="bold")
-    table.add_column("kind", style="cyan")
-    table.add_column("label")
-    table.add_column("state")
+    table.add_column("nombre", style="bold")
+    table.add_column("tipo", style="cyan")
+    table.add_column("etiqueta")
+    table.add_column("estado")
     for name, child in node.children.items():
         st = _object_state(child.payload)
         suffix = "/" if child.children else ""
@@ -142,11 +142,17 @@ def show_object(payload: Any, kind: str) -> RenderableType:
     if isinstance(payload, SdpBinding):
         return show_binding(payload)
     if isinstance(payload, RouteTarget):
-        return kv_table([("Direction", payload.direction), ("Route Target", payload.value), ("Service", payload.svc_id)])
+        return kv_table(
+            [
+                ("Dirección", payload.direction),
+                ("Route Target", payload.value),
+                ("Servicio", payload.svc_id),
+            ]
+        )
     if isinstance(payload, StaticRoute):
         return kv_table(
             [
-                ("Prefix", payload.prefix),
+                ("Prefijo", payload.prefix),
                 ("Next hop", payload.next_hop),
                 ("Site", payload.site_id),
                 ("Admin", state(payload.admin)),
@@ -166,9 +172,9 @@ def show_object(payload: Any, kind: str) -> RenderableType:
         return kv_table(
             [
                 ("MAC", payload.mac),
-                ("Port", payload.port),
+                ("Puerto", payload.port),
                 ("Site", payload.site_id),
-                ("Source", payload.source),
+                ("Origen", payload.source),
             ]
         )
     if isinstance(payload, Alarm):
@@ -182,37 +188,37 @@ def show_ne(ne: NetworkElement) -> RenderableType:
     ports = sum(len(c.ports) for c in ne.cards)
     general = kv_table(
         [
-            ("Displayed Name", ne.name),
-            ("System IP", ne.system_ip),
-            ("Chassis Type", ne.ne_type),
-            ("Software Version", ne.version),
-            ("Site", ne.site),
-            ("Equipment Group", ne.group),
-            ("Chassis MAC", ne.chassis_mac),
-            ("Administrative State", state(ne.admin)),
-            ("Operational State", state(ne.oper)),
-            ("Management State", state(ne.management)),
-            ("Protocols", ", ".join(p.upper() for p in ne.protocols)),
-            ("Cards / Ports", f"{len(ne.cards)} / {ports}"),
+            ("Nombre", ne.name),
+            ("IP de sistema", ne.system_ip),
+            ("Tipo de chasis", ne.ne_type),
+            ("Versión de software", ne.version),
+            ("Sitio", ne.site),
+            ("Grupo de equipo", ne.group),
+            ("MAC del chasis", ne.chassis_mac),
+            ("Estado administrativo", state(ne.admin)),
+            ("Estado operacional", state(ne.oper)),
+            ("Estado de gestión", state(ne.management)),
+            ("Protocolos", ", ".join(p.upper() for p in ne.protocols)),
+            ("Tarjetas / puertos", f"{len(ne.cards)} / {ports}"),
         ]
     )
-    cards = Table(title="Cards", border_style="grey37")
+    cards = Table(title="Tarjetas", border_style="grey37")
     cards.add_column("slot")
-    cards.add_column("type")
+    cards.add_column("tipo")
     cards.add_column("admin")
     cards.add_column("oper")
-    cards.add_column("ports")
+    cards.add_column("puertos")
     for c in ne.cards:
         cards.add_row(c.slot, c.card_type, state(c.admin), state(c.oper), str(len(c.ports)))
-    return Panel(Group(general, cards), title=f"NE properties  {ne.name}", border_style="cyan")
+    return Panel(Group(general, cards), title=f"Propiedades del NE  {ne.name}", border_style="cyan")
 
 
 def show_card(card: Card) -> RenderableType:
-    t = Table(title=f"Card slot {card.slot}", border_style="grey37")
-    t.add_column("port")
-    t.add_column("mode")
+    t = Table(title=f"Tarjeta slot {card.slot}", border_style="grey37")
+    t.add_column("puerto")
+    t.add_column("modo")
     t.add_column("encap")
-    t.add_column("speed")
+    t.add_column("velocidad")
     t.add_column("admin")
     t.add_column("oper")
     for p in card.ports:
@@ -220,10 +226,10 @@ def show_card(card: Card) -> RenderableType:
     head = kv_table(
         [
             ("Slot", card.slot),
-            ("Card Type", card.card_type),
-            ("Equipped", card.equipped),
-            ("Administrative State", state(card.admin)),
-            ("Operational State", state(card.oper)),
+            ("Tipo de tarjeta", card.card_type),
+            ("Equipada", card.equipped),
+            ("Estado administrativo", state(card.admin)),
+            ("Estado operacional", state(card.oper)),
         ]
     )
     return Group(head, t)
@@ -233,17 +239,17 @@ def show_port(port: Port) -> RenderableType:
     return Panel(
         kv_table(
             [
-                ("Port", port.name),
-                ("Mode", port.mode),
+                ("Puerto", port.name),
+                ("Modo", port.mode),
                 ("Encap", port.encap),
-                ("Speed", port.speed),
+                ("Velocidad", port.speed),
                 ("LAG", port.lag or "—"),
-                ("Description", port.description),
-                ("Administrative State", state(port.admin)),
-                ("Operational State", state(port.oper)),
+                ("Descripción", port.description),
+                ("Estado administrativo", state(port.admin)),
+                ("Estado operacional", state(port.oper)),
             ]
         ),
-        title="Port properties",
+        title="Propiedades del puerto",
         border_style="cyan",
     )
 
@@ -253,19 +259,19 @@ def show_lsp(lsp: Lsp) -> RenderableType:
     return Panel(
         kv_table(
             [
-                ("Name", lsp.name),
-                ("Type", lsp.lsp_type),
-                ("Signaling", lsp.signaling.upper()),
+                ("Nombre", lsp.name),
+                ("Tipo", lsp.lsp_type),
+                ("Señalización", lsp.signaling.upper()),
                 ("From", lsp.from_ne),
                 ("To", lsp.to_ne),
                 ("Path", lsp.path),
                 ("Hops", hops),
-                ("Metric", lsp.metric),
-                ("Bandwidth", f"{lsp.bandwidth_mbps} Mbps"),
+                ("Métrica", lsp.metric),
+                ("Ancho de banda", f"{lsp.bandwidth_mbps} Mbps"),
                 ("Setup / Hold", f"{lsp.setup_priority} / {lsp.hold_priority}"),
-                ("Protection", lsp.protection),
-                ("Administrative State", state(lsp.admin)),
-                ("Operational State", state(lsp.oper)),
+                ("Protección", lsp.protection),
+                ("Estado administrativo", state(lsp.admin)),
+                ("Estado operacional", state(lsp.oper)),
             ]
         ),
         title=f"LSP  {lsp.name}",
@@ -274,10 +280,10 @@ def show_lsp(lsp: Lsp) -> RenderableType:
 
 
 def show_path(path: MplsPath) -> RenderableType:
-    hops = " → ".join(path.hops) if path.hops else "(none)"
+    hops = " → ".join(path.hops) if path.hops else "(ninguno)"
     return kv_table(
-        [("Name", path.name), ("Hop type", path.hop_type), ("Hops", hops)],
-        title="MPLS Path",
+        [("Nombre", path.name), ("Tipo de hop", path.hop_type), ("Hops", hops)],
+        title="Path MPLS",
     )
 
 
@@ -285,12 +291,12 @@ def show_mpls_if(iface: MplsInterface) -> RenderableType:
     return kv_table(
         [
             ("NE", iface.ne),
-            ("MPLS Interface", iface.name),
-            ("Bound L3 Interface", iface.interface),
-            ("TE Metric", iface.te_metric),
-            ("SRLGs", ", ".join(iface.srlgs) or "—"),
-            ("Administrative State", state(iface.admin)),
-            ("Operational State", state(iface.oper)),
+            ("Interfaz MPLS", iface.name),
+            ("Interfaz L3 asociada", iface.interface),
+            ("Métrica TE", iface.te_metric),
+            ("SRLG", ", ".join(iface.srlgs) or "—"),
+            ("Estado administrativo", state(iface.admin)),
+            ("Estado operacional", state(iface.oper)),
         ]
     )
 
@@ -299,16 +305,16 @@ def show_sdp(sdp: ServiceTunnel) -> RenderableType:
     return kv_table(
         [
             ("SDP ID", sdp.sdp_id),
-            ("Name", sdp.name),
+            ("Nombre", sdp.name),
             ("From", sdp.from_ne),
             ("To", sdp.to_ne),
             ("Far End", sdp.far_end),
-            ("Signaling", sdp.signaling),
+            ("Señalización", sdp.signaling),
             ("LSP", sdp.lsp),
-            ("Administrative State", state(sdp.admin)),
-            ("Operational State", state(sdp.oper)),
+            ("Estado administrativo", state(sdp.admin)),
+            ("Estado operacional", state(sdp.oper)),
         ],
-        title="Service tunnel (SDP)",
+        title="Túnel de servicio (SDP)",
     )
 
 
@@ -316,15 +322,15 @@ def show_customer(cust: Customer) -> RenderableType:
     return Panel(
         kv_table(
             [
-                ("Class", "subscr.Subscriber"),
+                ("Clase", "subscr.Subscriber"),
                 ("objectFullName", cust.fdn),
                 ("subscriberId", cust.subscriber_id),
                 ("displayedName", cust.displayed_name),
-                ("Description", cust.description),
-                ("Contact", cust.contact),
+                ("Descripción", cust.description),
+                ("Contacto", cust.contact),
             ]
         ),
-        title=f"Customer  {cust.subscriber_id}",
+        title=f"Cliente  {cust.subscriber_id}",
         border_style="cyan",
     )
 
@@ -334,25 +340,25 @@ def show_service(svc: Service) -> RenderableType:
     return Panel(
         kv_table(
             [
-                ("Class", f"{svc.svc_type}.{svc.svc_type.capitalize()}"),
+                ("Clase", f"{svc.svc_type}.{svc.svc_type.capitalize()}"),
                 ("objectFullName", svc.fdn),
-                ("id", svc.mgr_id),
-                ("serviceId", svc.svc_id),
+                ("id (NFM-P)", svc.mgr_id),
+                ("serviceId (NE)", svc.svc_id),
                 ("displayedName", svc.name),
-                ("Type (NFM-P / NSP)", f"{svc.svc_type.upper()} / {nsp_name}"),
+                ("Tipo (NFM-P / NSP)", f"{svc.svc_type.upper()} / {nsp_name}"),
                 ("subscriberPointer", svc.subscriber_pointer),
-                ("Customer", f"{svc.customer} ({svc.customer_id})"),
+                ("Cliente", f"{svc.customer} ({svc.customer_id})"),
                 ("Sites", ", ".join(svc.sites)),
                 ("SDP IDs", ", ".join(str(i) for i in svc.sdp_ids) or "—"),
                 ("Route Distinguisher", svc.route_distinguisher or "—"),
                 ("MTU", svc.mtu),
                 ("oosReasons", svc.oos_reasons or "—"),
-                ("Description", svc.description),
-                ("Administrative State", state(svc.admin)),
-                ("Operational State", state(svc.oper)),
+                ("Descripción", svc.description),
+                ("Estado administrativo", state(svc.admin)),
+                ("Estado operacional", state(svc.oper)),
             ]
         ),
-        title=f"Service  {svc.svc_id}",
+        title=f"Servicio  {svc.svc_id}",
         border_style="cyan",
     )
 
@@ -360,33 +366,33 @@ def show_service(svc: Service) -> RenderableType:
 def show_site(site: ServiceSite) -> RenderableType:
     return kv_table(
         [
-            ("Class", "service.Site"),
+            ("Clase", "service.Site"),
             ("objectFullName", site.fdn),
             ("siteId", site.site_id),
             ("NE", site.ne),
             ("MTU", site.mtu),
-            ("Administrative State", state(site.admin)),
-            ("Operational State", state(site.oper)),
+            ("Estado administrativo", state(site.admin)),
+            ("Estado operacional", state(site.oper)),
         ],
-        title="Service site",
+        title="Site del servicio",
     )
 
 
 def show_sap(sap: AccessInterface) -> RenderableType:
     rows = [
-        ("Class", "vprn.L3AccessInterface" if sap.layer == "l3" else "vpls.L2AccessInterface"),
+        ("Clase", "vprn.L3AccessInterface" if sap.layer == "l3" else "vpls.L2AccessInterface"),
         ("objectFullName", sap.fdn),
         ("SAP", sap.name),
-        ("Port", sap.port),
+        ("Puerto", sap.port),
         ("Site", sap.site_id),
-        ("Layer", sap.layer),
+        ("Capa", sap.layer),
         ("Encap", sap.encap),
-        ("Outer tag", sap.outer_tag),
+        ("Tag externo", sap.outer_tag),
         ("primaryIPv4Address", sap.primary_ipv4 or "—"),
-        ("Administrative State", state(sap.admin)),
-        ("Operational State", state(sap.oper)),
+        ("Estado administrativo", state(sap.admin)),
+        ("Estado operacional", state(sap.oper)),
     ]
-    return Panel(kv_table(rows), title="Access interface (SAP)", border_style="cyan")
+    return Panel(kv_table(rows), title="Interfaz de acceso (SAP)", border_style="cyan")
 
 
 def show_binding(b: SdpBinding) -> RenderableType:
@@ -395,10 +401,10 @@ def show_binding(b: SdpBinding) -> RenderableType:
             ("objectFullName", b.fdn),
             ("SDP ID", b.sdp_id),
             ("VC ID", b.vc_id),
-            ("Type", b.binding_type),
+            ("Tipo", b.binding_type),
             ("Site", b.site_id),
-            ("Administrative State", state(b.admin)),
-            ("Operational State", state(b.oper)),
+            ("Estado administrativo", state(b.admin)),
+            ("Estado operacional", state(b.oper)),
         ],
         title="SDP binding",
     )
@@ -408,19 +414,19 @@ def show_alarm(alarm: Alarm) -> RenderableType:
     return Panel(
         kv_table(
             [
-                ("Alarm ID", alarm.id),
-                ("Severity", state(alarm.severity)),
-                ("Probable Cause", alarm.probable_cause),
-                ("Object", alarm.object_fdn),
+                ("ID de alarma", alarm.id),
+                ("Severidad", state(alarm.severity)),
+                ("Causa probable", alarm.probable_cause),
+                ("Objeto", alarm.object_fdn),
                 ("NE", alarm.ne),
-                ("Raised", alarm.raised.strftime("%Y-%m-%d %H:%M:%SZ")),
-                ("Acknowledged", "yes" if alarm.acked else "no"),
-                ("Acked by", alarm.acked_by or "—"),
-                ("Cleared", "yes" if alarm.cleared else "no"),
-                ("Additional Text", alarm.additional_text),
+                ("Levantada", alarm.raised.strftime("%Y-%m-%d %H:%M:%SZ")),
+                ("Reconocida", "sí" if alarm.acked else "no"),
+                ("Reconocida por", alarm.acked_by or "—"),
+                ("Limpiada", "sí" if alarm.cleared else "no"),
+                ("Texto adicional", alarm.additional_text),
             ]
         ),
-        title="Alarm",
+        title="Alarma",
         border_style=SEV_STYLE.get(alarm.severity, "cyan"),
     )
 
@@ -428,29 +434,29 @@ def show_alarm(alarm: Alarm) -> RenderableType:
 def show_user(user: User) -> RenderableType:
     return kv_table(
         [
-            ("Username", user.username),
-            ("Display Name", user.display_name),
-            ("User Group", user.group),
-            ("Role", user.role),
-            ("Account State", user.state),
-            ("Access", user.access),
+            ("Usuario", user.username),
+            ("Nombre", user.display_name),
+            ("Grupo", user.group),
+            ("Rol", user.role),
+            ("Estado de la cuenta", user.state),
+            ("Acceso", user.access),
             ("Span of Control", ", ".join(user.span) or "ALL"),
-            ("E-mail", user.email),
-            ("Last Login", user.last_login.strftime("%Y-%m-%d %H:%M:%SZ") if user.last_login else "—"),
+            ("Correo", user.email),
+            ("Último login", user.last_login.strftime("%Y-%m-%d %H:%M:%SZ") if user.last_login else "—"),
         ],
-        title="User account",
+        title="Cuenta de usuario",
     )
 
 
 def ne_table(nes: Iterable[NetworkElement]) -> Table:
-    t = Table(title="Network Elements", border_style="grey37")
-    t.add_column("name", style="bold")
-    t.add_column("system IP")
-    t.add_column("type")
-    t.add_column("version")
-    t.add_column("group")
-    t.add_column("site")
-    t.add_column("mgmt")
+    t = Table(title="Elementos de red", border_style="grey37")
+    t.add_column("nombre", style="bold")
+    t.add_column("IP de sistema")
+    t.add_column("tipo")
+    t.add_column("versión")
+    t.add_column("grupo")
+    t.add_column("sitio")
+    t.add_column("gestión")
     t.add_column("oper")
     for ne in nes:
         t.add_row(
@@ -467,9 +473,9 @@ def ne_table(nes: Iterable[NetworkElement]) -> Table:
 
 
 def lsp_table(lsps: Iterable[Lsp]) -> Table:
-    t = Table(title="MPLS LSPs", border_style="grey37")
-    t.add_column("name", style="bold")
-    t.add_column("type")
+    t = Table(title="LSPs MPLS", border_style="grey37")
+    t.add_column("nombre", style="bold")
+    t.add_column("tipo")
     t.add_column("sig")
     t.add_column("from")
     t.add_column("to")
@@ -495,14 +501,14 @@ def lsp_table(lsps: Iterable[Lsp]) -> Table:
 
 
 def customer_table(customers: Iterable[Customer], store: Any = None, user: Any = None) -> Table:
-    t = Table(title="Customers  (subscr.Subscriber)", border_style="grey37")
+    t = Table(title="Clientes  (subscr.Subscriber)", border_style="grey37")
     t.add_column("id", justify="right", style="bold")
     t.add_column("displayedName")
     t.add_column("objectFullName", style="dim")
     t.add_column("vprn")
     t.add_column("vpls")
     t.add_column("epipe")
-    t.add_column("description")
+    t.add_column("descripción")
     for c in customers:
         vprn = vpls = epipe = 0
         if store is not None and user is not None:
@@ -526,12 +532,12 @@ def customer_table(customers: Iterable[Customer], store: Any = None, user: Any =
 
 
 def service_table(svcs: Iterable[Service]) -> Table:
-    t = Table(title="Services", border_style="grey37")
+    t = Table(title="Servicios", border_style="grey37")
     t.add_column("serviceId", justify="right", style="bold")
     t.add_column("id", justify="right", style="dim")
-    t.add_column("name", style="bold")
-    t.add_column("type")
-    t.add_column("customer")
+    t.add_column("nombre", style="bold")
+    t.add_column("tipo")
+    t.add_column("cliente")
     t.add_column("subscriberPointer", style="dim")
     t.add_column("sites")
     t.add_column("admin")
@@ -552,14 +558,14 @@ def service_table(svcs: Iterable[Service]) -> Table:
 
 
 def alarm_table(alarms: Iterable[Alarm]) -> Table:
-    t = Table(title="Alarms", border_style="grey37")
+    t = Table(title="Alarmas", border_style="grey37")
     t.add_column("id")
     t.add_column("sev")
-    t.add_column("cause")
-    t.add_column("object")
+    t.add_column("causa")
+    t.add_column("objeto")
     t.add_column("NE")
-    t.add_column("acked")
-    t.add_column("raised")
+    t.add_column("ack")
+    t.add_column("levantada")
     ordered = sorted(
         (a for a in alarms if not a.cleared),
         key=lambda a: (-SEVERITY_ORDER.get(a.severity, 0), a.raised),
@@ -571,33 +577,33 @@ def alarm_table(alarms: Iterable[Alarm]) -> Table:
             a.probable_cause,
             a.object_fdn,
             a.ne,
-            "yes" if a.acked else "no",
+            "sí" if a.acked else "no",
             a.raised.strftime("%H:%M:%SZ"),
         )
     if not ordered:
-        t.add_row("—", "cleared", "no outstanding alarms", "", "", "", "")
+        t.add_row("—", "cleared", "sin alarmas pendientes", "", "", "", "")
     return t
 
 
 def stats_table(samples: Iterable[StatSample], fdn: str) -> Table:
-    t = Table(title=f"Performance statistics  {fdn}", border_style="grey37")
-    t.add_column("counter")
-    t.add_column("value", justify="right")
-    t.add_column("unit")
-    t.add_column("collected")
+    t = Table(title=f"Estadísticas de performance  {fdn}", border_style="grey37")
+    t.add_column("contador")
+    t.add_column("valor", justify="right")
+    t.add_column("unidad")
+    t.add_column("recogido")
     rows = [s for s in samples if s.object_fdn == fdn]
     for s in rows:
         val = f"{s.value:,.0f}" if s.value >= 100 else f"{s.value:.1f}"
         t.add_row(s.counter, val, s.unit, s.collected.strftime("%H:%M:%SZ"))
     if not rows:
-        t.add_row("(none)", "", "", "no MIB policy match")
+        t.add_row("(ninguno)", "", "", "sin coincidencia de política MIB")
     return t
 
 
 def topology_ascii() -> RenderableType:
     art = Text.from_markup(
         """
-[bold cyan]Physical / IGP topology[/]  (lab ARGENTINA)
+[bold cyan]Topología física / IGP[/]  (lab ARGENTINA)
 
                     [green]PE-SALTA-01[/]
                          |
@@ -609,74 +615,104 @@ def topology_ascii() -> RenderableType:
                 |
          [green]PE-ROSARIO-01[/]
 
-  [green]green[/] oper-up    [yellow]yellow[/] degraded    [red]red[/] oper-down
+  [green]verde[/] oper-up    [yellow]amarillo[/] degraded    [red]rojo[/] oper-down
   RSVP-TE: lsp-ba-cba, lsp-core-p2p, lsp-ba-sal [red](down)[/]
   SR-TE:   lsp-ba-mza-sr
   LDP:     lsp-ba-ros
 """
     )
-    return Panel(art, border_style="cyan", title="Application → Topology")
+    return Panel(art, border_style="cyan", title="Aplicación → Topología")
 
 
 def help_text() -> RenderableType:
-    flow = Table(title="Shell  user@NSP  ·  nested like Fire / SR OS", border_style="grey37")
-    flow.add_column("you type", style="bold cyan")
-    flow.add_column("prompt becomes")
+    flow = Table(title="Shell  user@NSP  ·  anidado como Fire / SR OS", border_style="grey37")
+    flow.add_column("escribís", style="bold cyan")
+    flow.add_column("el prompt queda")
     for cmd, desc in [
         ("(login)", "admin@172.24.80.28> "),
         ("customers", "admin@172.24.80.28>customers> "),
         ("12", "admin@172.24.80.28>customers>12> "),
         ("vprn 100", "admin@172.24.80.28>customers>12>vprn>100> "),
-        ("sites", "…>100>sites>   (or one-liner: customers 12 vprn 100 sites)"),
-        ("exit", "up one level   ·   exit all / top = root"),
-        ("logout", "end session"),
+        ("sites", "…>100>sites>   (o en una línea: customers 12 vprn 100 sites)"),
+        ("exit", "sube un nivel   ·   exit all / top = raíz"),
+        ("logout  /  quit", "cierra la sesión"),
+        ("Ctrl-C", "cancela y cierra"),
+        ("Ctrl-D", "cierra la sesión (EOF)"),
     ]:
         flow.add_row(cmd, desc)
 
-    nav = Table(title="At any context", border_style="grey37")
-    nav.add_column("command", style="bold cyan")
-    nav.add_column("what it does")
+    nav = Table(title="En cualquier contexto", border_style="grey37")
+    nav.add_column("comando", style="bold cyan")
+    nav.add_column("qué hace")
     for cmd, desc in [
-        ("?  or  ls", "list children of this context"),
-        ("info  or  show", "property form of current object"),
-        ("<name>", "enter that child (Fire-style)"),
-        ("exit", "go up (like a router CLI)"),
-        ("find <text>", "search customers, services, IPs, MACs"),
+        ("?  o  ls", "lista los hijos de este contexto"),
+        ("info  o  show", "formulario de propiedades del objeto actual"),
+        ("<nombre>", "entra a ese hijo (estilo Fire)"),
+        ("exit", "sube un nivel (como CLI de router)"),
+        ("find <texto>", "busca clientes, servicios, IPs, MACs"),
+        ("tree [n]", "árbol de hijos (profundidad 1–6)"),
+        ("pwd", "muestra el prompt / ruta actual"),
+        ("debug [on|off]", "imprime cada petición HTTP"),
     ]:
         nav.add_row(cmd, desc)
 
-    slash = Table(title="Slash commands  (type /  ·  Tab completes)", border_style="grey37")
-    slash.add_column("command", style="bold cyan")
-    slash.add_column("what it does")
+    slash = Table(title="Comandos con /  (escribí /  ·  Tab completa)", border_style="grey37")
+    slash.add_column("comando", style="bold cyan")
+    slash.add_column("qué hace")
     for cmd, desc in [
-        ("/customers", "list subscr.Subscriber"),
-        ("/customer <id>", "open customer (VPRN/VPLS/Epipe counts)"),
-        ("/services [id]", "services, optionally of one customer"),
-        ("/help", "this help"),
-        ("/status", "session summary"),
-        ("/alarms", "faults"),
-        ("/ne", "network elements"),
-        ("/mpls", "transport LSPs / tunnels"),
-        ("/quit", "end session"),
+        ("/customers", "lista subscr.Subscriber"),
+        ("/customer <id>", "abre un cliente (conteo VPRN/VPLS/Epipe)"),
+        ("/services [id]", "servicios; con id, los de ese cliente"),
+        ("/ne [nombre|IP]", "elementos de red (span of control)"),
+        ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS"),
+        ("/alarms [list|ack|clear|sev]", "fallas"),
+        ("/stats <fdn>", "estadísticas de performance"),
+        ("/topology", "topología ASCII del lab"),
+        ("/tasks", "gestor de tareas de esta sesión"),
+        ("/users", "usuarios locales (solo admin)"),
+        ("/resync [NE…]", "resincroniza NE(s)"),
+        ("/passwd <actual> <nueva>", "cambia la contraseña"),
+        ("/whoami", "usuario, rol, span of control"),
+        ("/status", "resumen de sesión"),
+        ("/debug [on|off]", "traza HTTP"),
+        ("/clear", "limpia la pantalla"),
+        ("/help", "esta ayuda"),
+        ("/quit  /logout", "cierra la sesión"),
     ]:
         slash.add_row(cmd, desc)
 
-    related = Table(title="Related objects under a service", border_style="grey37")
-    related.add_column("folder", style="bold cyan")
-    related.add_column("NFM-P class / API")
+    related = Table(title="Objetos bajo un servicio", border_style="grey37")
+    related.add_column("carpeta", style="bold cyan")
+    related.add_column("clase NFM-P / API")
     for cmd, desc in [
-        ("sites", "vprn.Site / vpls.Site / epipe.Site  svc-mgr:service-<id>:<ip>  (id NFM-P ≠ serviceId)"),
-        ("saps", "L3AccessInterface or L2AccessInterface (SAP)"),
-        ("sdp-bindings", "spoke/mesh SDP binding"),
+        ("sites", "vprn.Site / vpls.Site / epipe.Site  FDN svc-mgr:service-<id>:<ip>"),
+        ("saps", "L3AccessInterface o L2AccessInterface (SAP)"),
+        ("sdp-bindings", "SDP binding spoke/mesh"),
         ("tunnels", "svt.Tunnel (SDP)"),
-        ("lsps", "mpls.DynamicLsp under those SDPs"),
-        ("alarms", "fm.AlarmObject on the service"),
-        ("route-targets / static-routes / bgp-peers", "VPRN only"),
+        ("lsps", "mpls.DynamicLsp de esos SDP"),
+        ("alarms", "fm.AlarmObject del servicio"),
+        ("route-targets / static-routes / bgp-peers", "solo VPRN"),
         ("mac-table", "VPLS FIB / ProxyArpNdMacAddress"),
     ]:
         related.add_row(cmd, desc)
 
-    return Group(flow, nav, slash, related)
+    ids = Table(title="IDs de servicio y arranque", border_style="grey37")
+    ids.add_column("tema", style="bold cyan")
+    ids.add_column("detalle")
+    for cmd, desc in [
+        ("serviceId", "ID del servicio en el NE; es el que se navega (vprn 10)"),
+        ("id", "ID interno NFM-P; arma el FDN svc-mgr:service-<id>"),
+        ("--host", "IP del NSP en el prompt (user@host>)"),
+        ("--user / --password", "login no interactivo"),
+        ("--debug", "traza cada petición HTTP"),
+        ("--offline", "no contacta el NSP; usa el inventario lab"),
+        ("--batch / --script", "ejecuta comandos y sale"),
+        ("backend live", "OAuth2 + SAM-O find contra --host"),
+        ("backend lab", "inventario local si el NSP no responde o --offline"),
+    ]:
+        ids.add_row(cmd, desc)
+
+    return Group(flow, nav, slash, related, ids)
 
 
 def _object_state(payload: Any) -> str:

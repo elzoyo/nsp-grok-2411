@@ -27,7 +27,7 @@ def test_username_is_case_insensitive():
 def test_bad_password_counts_down():
     store = Store()
     _, err = authenticate(store.users, "viewer", "wrong")
-    assert "remaining" in err
+    assert "intento" in err
     assert store.users["viewer"].failed_logins == 1
 
 
@@ -35,9 +35,9 @@ def test_lockout_after_five_failures():
     store = Store()
     for _ in range(5):
         _, err = authenticate(store.users, "viewer", "nope")
-    assert "locked" in err.lower()
+    assert "bloqueada" in err.lower()
     _, err = authenticate(store.users, "viewer", "Nokia1234!")
-    assert "locked" in err.lower()
+    assert "bloqueada" in err.lower()
 
 
 def test_password_policy():
