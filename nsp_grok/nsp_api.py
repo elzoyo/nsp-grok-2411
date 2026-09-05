@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any
 from xml.etree import ElementTree
 
@@ -13,13 +14,17 @@ import urllib3
 
 from nsp_grok.models import (
     AccessInterface,
+    Alarm,
     BgpPeer,
     Customer,
+    Lsp,
+    MacEntry,
     RouteNextHop,
     RouteTarget,
     SdpBinding,
     Service,
     ServiceSite,
+    ServiceTunnel,
     StaticRoute,
 )
 
@@ -545,6 +550,120 @@ class NspClient:
                 out.append(binding)
         return out
 
+    def load_tunnels(self, bindings: list[SdpBinding]) -> list[ServiceTunnel]:
+        """svt.Tunnel by SDP id (help: svt.Tunnel). children empty; no global dump."""
+        out: list[ServiceTunnel] = []
+        seen: set[int] = set()
+        for sdp_id in sorted({b.sdp_id for b in bindings if b.sdp_id}):
+            if sdp_id in seen:
+                continue
+            rows = self._optional_find(
+                ["svt.Tunnel"],
+                None,
+                {"equal": {"name": "id", "value": str(sdp_id)}},
+            )
+            if not rows:
+                rows = self._optional_find(
+                    ["svt.Tunnel"],
+                    None,
+                    {"equal": {"name": "sdpId", "value": str(sdp_id)}},
+                )
+            for row in rows:
+                tun = _tunnel_from_row(row, sdp_id)
+                if tun and tun.sdp_id not in seen:
+                    seen.add(tun.sdp_id)
+                    out.append(tun)
+        return out
+
+    def load_lsps(self, tunnels: list[ServiceTunnel]) -> list[Lsp]:
+        """mpls.DynamicLsp of SDPs (help: mpls.DynamicLsp). One find per LSP name."""
+        out: list[Lsp] = []
+        seen: set[str] = set()
+        for name in sorted({t.lsp for t in tunnels if t.lsp}):
+            if name in seen:
+                continue
+            rows = self._optional_find(
+                ["mpls.DynamicLsp", "mpls.StaticLsp"],
+                None,
+                {"equal": {"name": "displayedName", "value": name}},
+            )
+            if not rows:
+                rows = self._optional_find(
+                    ["mpls.DynamicLsp", "mpls.StaticLsp"],
+                    None,
+                    {
+                        "wildcard": {
+                            "name": "objectFullName",
+                            "value": f"%{name}",
+                        }
+                    },
+                )
+            for row in rows:
+                lsp = _lsp_from_row(row, name)
+                if lsp and lsp.name not in seen:
+                    seen.add(lsp.name)
+                    out.append(lsp)
+            if name not in seen:
+                seen.add(name)
+        return out
+
+    def load_service_alarms(self, svc: Service) -> list[Alarm]:
+        """fm.AlarmObject on the service FDN — never unfiltered."""
+        filt = {
+            "wildcard": {
+                "name": "objectFullName",
+                "value": f"{svc.fdn}%",
+            }
+        }
+        rows = self._optional_find(["fm.AlarmObject"], None, filt)
+        if not rows:
+            rows = self._optional_find(
+                ["fm.AlarmObject"],
+                None,
+                {
+                    "wildcard": {
+                        "name": "affectedObjectPointer",
+                        "value": f"{svc.fdn}%",
+                    }
+                },
+            )
+        out: list[Alarm] = []
+        for row in rows:
+            alarm = _alarm_from_row(row, svc)
+            if alarm:
+                out.append(alarm)
+        return out
+
+    def load_macs(self, svc: Service) -> list[MacEntry]:
+        """VPLS FIB / ProxyArpNdMacAddress under the service FDN."""
+        if svc.svc_type != "vpls":
+            return []
+        filt = {
+            "wildcard": {"name": "objectFullName", "value": f"{svc.fdn}:%"}
+        }
+        rows = self._optional_find(
+            ["vpls.MacRecord", "ProxyArpNdMacAddress", "vpls.FdbMacAddress"],
+            None,
+            filt,
+        )
+        out: list[MacEntry] = []
+        for row in rows:
+            mac = _mac_from_row(row, svc)
+            if mac:
+                out.append(mac)
+        return out
+
+    def _optional_find(
+        self,
+        classes: list[str],
+        attributes: list[str] | None,
+        filter_: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        try:
+            return self._find_first_class(classes, attributes, filter_)
+        except NspApiError:
+            return []
+
 
 def _rt_matches_service(value: str, svc: Service) -> bool:
     if not value:
@@ -604,6 +723,152 @@ def _binding_from_row(row: dict[str, Any], svc: Service) -> SdpBinding | None:
         admin=_state(row.get("administrativeState")),
         oper=_state(row.get("operationalState")),
         mgr_id=svc.mgr_id,
+    )
+
+
+def _pointer_tail(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return text.rsplit(":", 1)[-1]
+
+
+def _tunnel_from_row(row: dict[str, Any], sdp_id: int) -> ServiceTunnel | None:
+    sid = _int_field(row, "id", "sdpId") or sdp_id
+    name = str(row.get("displayedName") or f"sdp-{sid}")
+    far = str(row.get("farEndIpAddress") or row.get("farEnd") or "")
+    src = _pointer_tail(row.get("sourceSiteId") or row.get("fromPointer") or row.get("siteId"))
+    lsp = _pointer_tail(row.get("lspPointer") or row.get("lsp") or row.get("primaryLsp"))
+    sig = str(row.get("signaling") or row.get("signalingType") or "")
+    return ServiceTunnel(
+        sdp_id=sid,
+        name=name,
+        from_ne=src,
+        to_ne=far or _pointer_tail(row.get("destSiteId")),
+        signaling=sig.lower() or "tldp",
+        lsp=lsp,
+        admin=_state(row.get("administrativeState")),
+        oper=_state(row.get("operationalState")),
+        far_end=far,
+    )
+
+
+def _lsp_from_row(row: dict[str, Any], fallback_name: str) -> Lsp | None:
+    name = str(row.get("displayedName") or fallback_name)
+    if not name:
+        return None
+    src = _pointer_tail(row.get("fromPointer") or row.get("sourceSiteId") or row.get("from"))
+    dst = _pointer_tail(row.get("toPointer") or row.get("destSiteId") or row.get("to"))
+    path = str(row.get("pathName") or row.get("path") or row.get("primaryPath") or "")
+    hops_raw = row.get("hops") or row.get("hopList") or ""
+    if isinstance(hops_raw, list):
+        hops = [str(h) for h in hops_raw]
+    elif hops_raw:
+        hops = [p.strip() for p in str(hops_raw).replace("→", ",").split(",") if p.strip()]
+    else:
+        hops = []
+    lsp_type = str(row.get("type") or row.get("lspType") or "dynamic").lower()
+    sig = str(row.get("signaling") or row.get("signalingType") or "rsvp").lower()
+    return Lsp(
+        name=name,
+        lsp_type=lsp_type if lsp_type else "dynamic",
+        signaling=sig if sig else "rsvp",
+        from_ne=src,
+        to_ne=dst,
+        path=path or "loose-any",
+        hops=hops,
+        admin=_state(row.get("administrativeState")),
+        oper=_state(row.get("operationalState")),
+    )
+
+
+def _severity(value: Any) -> str:
+    text = str(value or "").lower()
+    for sev in ("critical", "major", "minor", "warning", "cleared"):
+        if sev in text:
+            return sev
+    return "warning"
+
+
+def _parse_time(raw: Any) -> datetime:
+    now = datetime.now(timezone.utc)
+    if raw is None or raw == "":
+        return now
+    text = str(raw).strip()
+    try:
+        num = float(text)
+        if num > 10_000_000_000:
+            return datetime.fromtimestamp(num / 1000.0, tz=timezone.utc)
+        if num > 1_000_000_000:
+            return datetime.fromtimestamp(num, tz=timezone.utc)
+    except ValueError:
+        pass
+    cleaned = text.replace("Z", "+0000")
+    if "+" not in cleaned[10:] and "-" not in cleaned[10:]:
+        cleaned = cleaned[:19]
+        try:
+            return datetime.strptime(cleaned, "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+        except ValueError:
+            try:
+                return datetime.strptime(cleaned, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            except ValueError:
+                return now
+    try:
+        return datetime.strptime(cleaned[:24], "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError:
+        return now
+
+
+def _alarm_from_row(row: dict[str, Any], svc: Service) -> Alarm | None:
+    fdn = str(row.get("objectFullName") or row.get("affectedObjectPointer") or svc.fdn)
+    alarm_id = str(
+        row.get("alarmId")
+        or row.get("displayedName")
+        or row.get("id")
+        or fdn.rsplit(":", 1)[-1]
+        or ""
+    )
+    if not alarm_id:
+        return None
+    ne = str(row.get("siteId") or row.get("ne") or _pointer_tail(row.get("nodePointer")) or "")
+    return Alarm(
+        id=alarm_id,
+        severity=_severity(row.get("severity") or row.get("perceivedSeverity")),  # type: ignore[arg-type]
+        probable_cause=str(row.get("probableCause") or row.get("specificProblem") or ""),
+        object_fdn=fdn,
+        ne=ne,
+        raised=_parse_time(row.get("timeRaised") or row.get("lastTimeDetected") or row.get("firstTimeDetected")),
+        additional_text=str(row.get("additionalText") or row.get("description") or ""),
+        acked=str(row.get("acknowledged") or "").lower() in {"true", "yes", "1"},
+        cleared=str(row.get("cleared") or "").lower() in {"true", "yes", "1"},
+    )
+
+
+def _mac_from_row(row: dict[str, Any], svc: Service) -> MacEntry | None:
+    mac = str(row.get("macAddress") or row.get("mac") or row.get("displayedName") or "").strip()
+    if not mac or ":" not in mac and "-" not in mac and len(mac) < 12:
+        fdn = str(row.get("objectFullName") or "")
+        mac = fdn.rsplit(":", 1)[-1]
+    if not mac:
+        return None
+    mac = mac.replace("-", ":")
+    site_id = str(row.get("siteId") or "")
+    if not site_id:
+        fdn = str(row.get("objectFullName") or "")
+        if fdn.startswith(svc.fdn + ":"):
+            site_id = fdn[len(svc.fdn) + 1 :].split(":", 1)[0]
+    source = str(row.get("type") or row.get("source") or row.get("learnedType") or "learned").lower()
+    if "static" in source:
+        source = "static"
+    elif "dyn" in source or "learn" in source:
+        source = "learned"
+    port = _port_from_pointer(str(row.get("portPointer") or row.get("sapPointer") or row.get("port") or ""))
+    return MacEntry(
+        svc_id=svc.svc_id,
+        site_id=site_id,
+        mac=mac,
+        port=port,
+        source=source or "learned",
     )
 
 

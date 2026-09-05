@@ -44,6 +44,7 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 - Live SAM-O: `subscr.Subscriber`, servicios por `subscriberPointer`, `*.Site`, SAP L3/L2 (`portPointer`).
 - VPRN live: máscara (`rtr.VirtualRouterIpAddress`), estáticas, `bgp.Site`, RT CPAM y next-hops (query 16).
 - Live SDP binding (`vprn/vpls/epipe.SdpBinding`) al entrar al servicio.
+- Live `svt.Tunnel` (por SDP id), `mpls.DynamicLsp`, `fm.AlarmObject` (FDN del servicio) y MAC VPLS.
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -62,13 +63,13 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 | Next-hops por RT | 16 | live (`topology.BgpRoutesNextHop`; ignora 0.0.0.0) |
 | RIB BGP | 13–14 | vacío en ese NFM-P; no es `show router` |
 
-**Live, en el árbol pero sin HTTP:** túneles (`svt.Tunnel`), LSPs, alarmas `fm`, stats, MAC VPLS.
+**Live, en el árbol pero sin HTTP:** stats de performance (MIB policy).
 
 **Producto:** primera instancia solo lectura — no crear servicios. MPLS create/shutdown sigue siendo del lab.
 
 **Deuda chica:** SAP live usa `portPointer` (último componente del FDN). `siteId` del NH CPAM es el CPAA, no el PE.
 
-Siguiente: túneles / LSPs, alarmas `fm`, stats, MAC VPLS. RIB 13–14 sigue vacío en este NFM-P.
+Siguiente: stats de performance. RIB 13–14 sigue vacío en este NFM-P. Clases no documentadas en SAM-O (`svt.Tunnel`, `fm.AlarmObject`, MAC) usan `children: ""` y filtro; si la clase no existe, no cierran la sesión.
 
 ## Retomar la sesión Grok Build
 

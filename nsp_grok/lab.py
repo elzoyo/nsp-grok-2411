@@ -809,11 +809,16 @@ class Store:
 
     def tunnels_of(self, svc: Service, user: User) -> list[ServiceTunnel]:
         nes = self.visible_nes(user)
-        return [
-            self.tunnels[i]
-            for i in svc.sdp_ids
-            if i in self.tunnels and (self.tunnels[i].from_ne in nes or self.tunnels[i].to_ne in nes)
-        ]
+        out: list[ServiceTunnel] = []
+        for i in svc.sdp_ids:
+            if i not in self.tunnels:
+                continue
+            tun = self.tunnels[i]
+            if tun.from_ne in nes or tun.to_ne in nes:
+                out.append(tun)
+            elif tun.from_ne not in self.nes and tun.to_ne not in self.nes:
+                out.append(tun)
+        return out
 
     def lsps_of(self, svc: Service, user: User) -> list[Lsp]:
         names = {t.lsp for t in self.tunnels_of(svc, user) if t.lsp}
@@ -881,3 +886,26 @@ class Store:
 
     def apply_bindings(self, svc_id: int, bindings: list[SdpBinding]) -> None:
         self.bindings = [b for b in self.bindings if b.svc_id != svc_id] + list(bindings)
+        svc = self.services.get(svc_id)
+        if svc is not None and bindings:
+            svc.sdp_ids = list(dict.fromkeys(b.sdp_id for b in bindings))
+
+    def apply_tunnels(self, tunnels: list[ServiceTunnel]) -> None:
+        for tun in tunnels:
+            self.tunnels[tun.sdp_id] = tun
+
+    def apply_lsps(self, lsps: list[Lsp]) -> None:
+        for lsp in lsps:
+            self.lsps[lsp.name] = lsp
+
+    def apply_service_alarms(self, svc: Service, alarms: list[Alarm]) -> None:
+        needle = svc.fdn
+        kept = [
+            a
+            for a in self.alarms
+            if needle not in a.object_fdn and needle not in a.additional_text
+        ]
+        self.alarms = kept + list(alarms)
+
+    def apply_macs(self, svc_id: int, macs: list[MacEntry]) -> None:
+        self.macs = [m for m in self.macs if m.svc_id != svc_id] + list(macs)

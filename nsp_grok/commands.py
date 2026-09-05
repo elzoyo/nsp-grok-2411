@@ -204,7 +204,14 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
                         sid, ctx.client.load_route_next_hops(svc, rts)
                     )
                 ctx.store.apply_sites_saps(sid, sites, saps)
-                ctx.store.apply_bindings(sid, ctx.client.load_sdp_bindings(svc))
+                bindings = ctx.client.load_sdp_bindings(svc)
+                ctx.store.apply_bindings(sid, bindings)
+                tunnels = ctx.client.load_tunnels(bindings)
+                ctx.store.apply_tunnels(tunnels)
+                ctx.store.apply_lsps(ctx.client.load_lsps(tunnels))
+                ctx.store.apply_service_alarms(svc, ctx.client.load_service_alarms(svc))
+                if svc.svc_type == "vpls":
+                    ctx.store.apply_macs(sid, ctx.client.load_macs(svc))
         ctx.rebuild()
     except UserCancelled:
         raise

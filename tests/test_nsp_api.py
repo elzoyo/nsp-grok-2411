@@ -2,12 +2,16 @@ import pytest
 
 from nsp_grok.nsp_api import (
     NspApiError,
+    _alarm_from_row,
     _binding_from_row,
+    _lsp_from_row,
+    _mac_from_row,
     _next_hop_from_row,
     _rt_matches_service,
     _saps_from_rows,
     _service_from_row,
     _static_from_row,
+    _tunnel_from_row,
     _vr_cidr,
     build_find_body,
     format_request,
@@ -353,3 +357,115 @@ def test_binding_from_row_parses_sdp_and_site():
     assert b.site_id == "10.251.121.250"
     assert b.mgr_id == 1
     assert b.fdn == "svc-mgr:service-1:10.251.121.250:sdp-101"
+
+
+def test_find_body_svt_tunnel_by_id():
+    body = build_find_body(
+        "svt.Tunnel",
+        None,
+        {"equal": {"name": "id", "value": "101"}},
+    )
+    assert body["find"]["fullClassName"] == "svt.Tunnel"
+    assert body["find"]["resultFilter"] == {"children": ""}
+    assert body["find"]["filter"]["equal"]["value"] == "101"
+
+
+def test_find_body_alarm_wildcard_service_fdn():
+    body = build_find_body(
+        "fm.AlarmObject",
+        None,
+        {"wildcard": {"name": "objectFullName", "value": "svc-mgr:service-1%"}},
+    )
+    assert body["find"]["fullClassName"] == "fm.AlarmObject"
+    assert body["find"]["filter"]["wildcard"]["value"] == "svc-mgr:service-1%"
+    assert "*" not in body["find"]["filter"]["wildcard"]["value"]
+    assert body["find"]["resultFilter"]["children"] == ""
+
+
+def test_find_body_vpls_mac_wildcard():
+    body = build_find_body(
+        "vpls.MacRecord",
+        None,
+        {"wildcard": {"name": "objectFullName", "value": "svc-mgr:service-25:%"}},
+    )
+    assert body["find"]["fullClassName"] == "vpls.MacRecord"
+    assert body["find"]["resultFilter"]["children"] == ""
+
+
+def test_tunnel_from_row():
+    tun = _tunnel_from_row(
+        {
+            "id": "101",
+            "displayedName": "sdp-ba-cba",
+            "farEndIpAddress": "10.10.2.1",
+            "sourceSiteId": "10.10.1.1",
+            "lspPointer": "network:10.10.1.1:dynamicLsp-lsp-ba-cba",
+            "signaling": "tldp",
+            "administrativeState": "up",
+            "operationalState": "up",
+        },
+        101,
+    )
+    assert tun is not None
+    assert tun.sdp_id == 101
+    assert tun.far_end == "10.10.2.1"
+    assert tun.lsp == "dynamicLsp-lsp-ba-cba"
+    assert tun.from_ne == "10.10.1.1"
+
+
+def test_lsp_from_row():
+    lsp = _lsp_from_row(
+        {
+            "displayedName": "lsp-ba-cba",
+            "fromPointer": "network:10.10.1.1",
+            "toPointer": "network:10.10.2.1",
+            "signaling": "rsvp",
+            "type": "dynamic",
+            "administrativeState": "up",
+            "operationalState": "up",
+        },
+        "lsp-ba-cba",
+    )
+    assert lsp is not None
+    assert lsp.name == "lsp-ba-cba"
+    assert lsp.from_ne == "10.10.1.1"
+    assert lsp.to_ne == "10.10.2.1"
+
+
+def test_alarm_from_row_maps_severity():
+    svc = Service(10, "VPRN 10", "vprn", "Red_Ope", 10, [], mgr_id=1)
+    alarm = _alarm_from_row(
+        {
+            "objectFullName": "svc-mgr:service-1:site-x",
+            "alarmId": "A-9",
+            "severity": "major",
+            "probableCause": "siteDown",
+            "siteId": "10.251.121.250",
+            "additionalText": "site down",
+            "acknowledged": "false",
+        },
+        svc,
+    )
+    assert alarm is not None
+    assert alarm.id == "A-9"
+    assert alarm.severity == "major"
+    assert alarm.ne == "10.251.121.250"
+    assert "svc-mgr:service-1" in alarm.object_fdn
+
+
+def test_mac_from_row():
+    svc = Service(5110, "VPLS 5110", "vpls", "X", 110, [], mgr_id=25)
+    mac = _mac_from_row(
+        {
+            "objectFullName": "svc-mgr:service-25:10.251.121.250:00:00:5e:00:53:01",
+            "macAddress": "00:00:5e:00:53:01",
+            "siteId": "10.251.121.250",
+            "portPointer": "1/1/10:200",
+            "type": "learned",
+        },
+        svc,
+    )
+    assert mac is not None
+    assert mac.mac == "00:00:5e:00:53:01"
+    assert mac.svc_id == 5110
+    assert mac.source == "learned"
