@@ -209,6 +209,7 @@ class AccessInterface:
     admin: AdminState = "up"
     oper: OperState = "up"
     mgr_id: int = 0
+    port_pointer: str = ""  # NFM-P portPointer FDN; port is the last component
 
     def __post_init__(self) -> None:
         if not self.mgr_id:
@@ -258,6 +259,7 @@ class RouteNextHop:
     route_target: str
     next_hop: str
     addr_type: str = "ipv4"
+    cpaa_site_id: str = ""  # SAM-O siteId = CPAA, not the PE
 
 
 @dataclass
@@ -277,6 +279,51 @@ class BgpPeer:
     peer_as: int
     admin: AdminState = "up"
     oper: OperState = "up"
+
+
+@dataclass
+class Cpaa:
+    """Query 10: topology.Cpaa — recolector CPAM."""
+
+    fdn: str
+    displayed_name: str = ""
+    router_id: str = ""
+    bgp_as: str = ""
+    protocol_record: str = ""
+    protocol_events: str = ""
+    rib_retrieve: str = ""
+    rt_retrieve: str = ""
+    admin: AdminState = "up"
+    oper: OperState = "up"
+
+
+@dataclass
+class BgpRibInfo:
+    """Query 13: topology.BgpRibInfo — agrupación RIB-IN (NH, MED, LOCAL-PREF, PEER)."""
+
+    svc_id: int
+    fdn: str
+    kind: str
+    key: str
+    as_number: str = ""
+    num_routes: int = 0
+
+
+@dataclass
+class BgpRibPrefix:
+    """Query 13 value / 14 monitored prefix — prefijos VPNv4 del VPRN."""
+
+    svc_id: int
+    prefix: str
+    rd: str
+    pref_type: str = "vpnIpv4"
+    next_hop: str = ""
+    source: str = "BgpMonitoredPrefix"
+    med: str = ""
+    local_pref: str = ""
+    as_path: str = ""
+    peer: str = ""
+    originator_id: str = ""
 
 
 @dataclass

@@ -93,11 +93,16 @@ def build_tree(store: Store, user: User) -> Node:
         str(cid): _customer_node(cust, store, user)
         for cid, cust in store.visible_customers(user).items()
     }
+    cpaa_kids = {}
+    for cpaa in store.cpaa:
+        name = (cpaa.router_id or cpaa.fdn.rsplit(":", 1)[-1] or "cpaa").replace(":", "-")
+        cpaa_kids[name] = _leaf(name, "cpaa", cpaa, cpaa.protocol_record or cpaa.fdn)
 
     root = _folder(
         "/",
         "Dominio gestionado NFM-P",
         customers=_folder("customers", "subscr.Subscriber", **customer_nodes),
+        cpaa=_folder("cpaa", "topology.Cpaa (query 10)", **cpaa_kids),
         equipment=_folder("equipment", "Vista de equipos", **group_nodes),
         routing=_folder("routing", "Vista de ruteo", **routing_kids),
         mpls=_folder(
@@ -212,10 +217,40 @@ def _service_node(svc, store: Store, user: User) -> Node:
             for p in store.bgp_peers
             if p.svc_id == svc.svc_id
         }
+        rib_kids = {
+            p.prefix.replace("/", "-").replace(":", "-"): _leaf(
+                p.prefix.replace("/", "-").replace(":", "-"),
+                "bgp-rib",
+                p,
+                f"{p.rd} {p.next_hop}".strip(),
+            )
+            for p in store.bgp_rib
+            if p.svc_id == svc.svc_id
+        }
+        info_kids = {
+            f"{i.kind}-{i.key}".replace(":", "-").replace("/", "-")[:40]: _leaf(
+                f"{i.kind}-{i.key}".replace(":", "-").replace("/", "-")[:40],
+                "bgp-rib-info",
+                i,
+                f"{i.num_routes} rutas" if i.num_routes else i.key,
+            )
+            for i in store.bgp_rib_info
+            if i.svc_id == svc.svc_id
+        }
         extra = {
             "route-targets": _folder("route-targets", "RT import/export", **rt_kids),
             "static-routes": _folder("static-routes", "", **sr_kids),
             "bgp-peers": _folder("bgp-peers", "", **bgp_kids),
+            "bgp-rib": _folder(
+                "bgp-rib",
+                "prefijos VPNv4 (query 13 value + 14)",
+                **rib_kids,
+            ),
+            "bgp-rib-info": _folder(
+                "bgp-rib-info",
+                "BgpRibInfo agrupado (NH/MED/LOCAL-PREF/PEER)",
+                **info_kids,
+            ),
         }
     if svc.svc_type == "vpls":
         mac_kids = {

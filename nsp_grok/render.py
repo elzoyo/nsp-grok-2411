@@ -23,6 +23,9 @@ from nsp_grok.models import (
     MplsPath,
     NetworkElement,
     Port,
+    BgpRibInfo,
+    BgpRibPrefix,
+    Cpaa,
     RouteNextHop,
     RouteTarget,
     Service,
@@ -142,6 +145,53 @@ def show_object(payload: Any, kind: str) -> RenderableType:
         return show_sap(payload)
     if isinstance(payload, SdpBinding):
         return show_binding(payload)
+    if isinstance(payload, Cpaa):
+        return kv_table(
+            [
+                ("Clase", "topology.Cpaa"),
+                ("objectFullName", payload.fdn),
+                ("displayedName", payload.displayed_name),
+                ("routerId", payload.router_id),
+                ("bgpAsPointer", payload.bgp_as),
+                ("protocolRecord", payload.protocol_record or "—"),
+                ("protocolEventTypes", payload.protocol_events or "—"),
+                ("bgpRibInfoLastRetrieveTime", payload.rib_retrieve),
+                ("bgpVpnv4RoutTargetLastRetrieveTime", payload.rt_retrieve),
+                ("Estado administrativo", state(payload.admin)),
+                ("Estado operacional", state(payload.oper)),
+            ],
+            title="CPAA (query 10)",
+        )
+    if isinstance(payload, BgpRibInfo):
+        return kv_table(
+            [
+                ("Clase", "topology.BgpRibInfo"),
+                ("objectFullName", payload.fdn),
+                ("Tipo", payload.kind),
+                ("Clave", payload.key),
+                ("asNumber", payload.as_number or "—"),
+                ("numRoutes", payload.num_routes),
+                ("Servicio", payload.svc_id),
+            ],
+            title="RIB-IN agrupado (query 13)",
+        )
+    if isinstance(payload, BgpRibPrefix):
+        return kv_table(
+            [
+                ("Clase", payload.source),
+                ("prefType", payload.pref_type),
+                ("prefRD", payload.rd),
+                ("Prefijo", payload.prefix),
+                ("Next hop", payload.next_hop or "—"),
+                ("MED", payload.med or "—"),
+                ("LOCAL-PREF", payload.local_pref or "—"),
+                ("AS_PATH", payload.as_path or "—"),
+                ("PEER", payload.peer or "—"),
+                ("ORIGINATOR-ID", payload.originator_id or "—"),
+                ("Servicio", payload.svc_id),
+            ],
+            title="Prefijo BGP (CPAM)",
+        )
     if isinstance(payload, RouteTarget):
         return kv_table(
             [
@@ -158,6 +208,7 @@ def show_object(payload: Any, kind: str) -> RenderableType:
                 ("Route Target", payload.route_target),
                 ("nextHop (PE)", payload.next_hop),
                 ("nextHopAddrType", payload.addr_type),
+                ("siteId (CPAA, no el PE)", payload.cpaa_site_id or "—"),
                 ("Servicio", payload.svc_id),
             ],
             title="Next-hop VPN (CPAM)",
@@ -397,6 +448,7 @@ def show_sap(sap: AccessInterface) -> RenderableType:
         ("objectFullName", sap.fdn),
         ("SAP", sap.name),
         ("Puerto", sap.port),
+        ("portPointer", sap.port_pointer or "—"),
         ("Site", sap.site_id),
         ("Capa", sap.layer),
         ("Encap", sap.encap),
@@ -679,7 +731,7 @@ def help_text() -> RenderableType:
         ("/ne [nombre|IP]", "elementos de red (span of control)"),
         ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS"),
         ("/alarms [list|ack|clear|sev]", "fallas"),
-        ("/stats <fdn>", "estadísticas de performance"),
+        ("/stats <fdn>", "stats live: find log record + timeCaptured (15 min)"),
         ("/topology", "topología ASCII del lab"),
         ("/tasks", "gestor de tareas de esta sesión"),
         ("/users", "usuarios locales (solo admin)"),
@@ -704,7 +756,7 @@ def help_text() -> RenderableType:
         ("tunnels", "svt.Tunnel (SDP)"),
         ("lsps", "mpls.DynamicLsp de esos SDP"),
         ("alarms", "fm.AlarmObject del servicio"),
-        ("route-targets / static-routes / bgp-peers", "solo VPRN; NH CPAM bajo cada RT"),
+        ("route-targets / bgp-rib / bgp-rib-info", "VPRN: RT, prefijos RIB (13/14), agrupación RIB-IN"),
         ("mac-table", "VPLS FIB / ProxyArpNdMacAddress"),
     ]:
         related.add_row(cmd, desc)

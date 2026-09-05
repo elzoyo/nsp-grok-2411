@@ -4,10 +4,14 @@ from nsp_grok.nsp_api import (
     NspApiError,
     _alarm_from_row,
     _binding_from_row,
+    _cpaa_from_row,
     _lsp_from_row,
     _mac_from_row,
     _next_hop_from_row,
+    _rib_from_row,
+    _rt_fdn_wildcards_for_rd,
     _rt_matches_service,
+    _rt_token,
     _saps_from_rows,
     _service_from_row,
     _static_from_row,
@@ -249,6 +253,7 @@ def test_sap_uses_port_pointer():
     )
     assert saps[0].name == "I-OPE-Pinar"
     assert saps[0].port == "lag-1"
+    assert saps[0].port_pointer == "network:10.251.121.250:lag-1"
     assert saps[0].primary_ipv4 == "12.5.196.1"
     assert saps[0].svc_id == 10
     assert saps[0].mgr_id == 1
@@ -324,6 +329,7 @@ def test_next_hop_ignores_null_and_keeps_pe_ip():
     assert nh.next_hop == "10.251.121.250"
     assert nh.route_target == "65000:10"
     assert nh.svc_id == 10
+    assert nh.cpaa_site_id == "10.251.243.250"
 
 
 def test_find_body_sdp_binding_wildcard():
@@ -469,3 +475,128 @@ def test_mac_from_row():
     assert mac.mac == "00:00:5e:00:53:01"
     assert mac.svc_id == 5110
     assert mac.source == "learned"
+
+
+def test_find_body_query14_monitored_prefix():
+    body = build_find_body(
+        "topology.BgpMonitoredPrefix",
+        None,
+        {
+            "and": {
+                "equal": [
+                    {"name": "prefType", "value": "vpnIpv4"},
+                    {"name": "prefRD", "value": "65000:10"},
+                ]
+            }
+        },
+    )
+    assert body["find"]["fullClassName"] == "topology.BgpMonitoredPrefix"
+    assert body["find"]["resultFilter"] == {"children": ""}
+    equals = body["find"]["filter"]["and"]["equal"]
+    assert equals[0]["value"] == "vpnIpv4"
+    assert equals[1]["value"] == "65000:10"
+
+
+def test_find_body_stats_time_captured():
+    body = build_find_body(
+        "equipment.InterfaceAdditionalStatsLogRecord",
+        None,
+        {
+            "and": {
+                "equal": {
+                    "name": "monitoredObjectPointer",
+                    "value": "network:10.10.1.1:port-1",
+                },
+                "between": {
+                    "name": "timeCaptured",
+                    "first": "1",
+                    "second": "2",
+                },
+            }
+        },
+    )
+    assert body["find"]["fullClassName"] == "equipment.InterfaceAdditionalStatsLogRecord"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert body["find"]["filter"]["and"]["between"]["name"] == "timeCaptured"
+
+
+def test_rt_fdn_uses_percent_not_colon():
+    assert _rt_token("65000:10") == "RT-65000%10"
+    wild = _rt_fdn_wildcards_for_rd("65000:10")
+    assert "tpgy-mgr:AS-65000:RT-65000%10%" in wild
+    assert all("RT-65000:10" not in w for w in wild)
+
+
+def test_find_body_query10_cpaa():
+    body = build_find_body(
+        "topology.Cpaa",
+        [
+            "objectFullName",
+            "displayedName",
+            "administrativeState",
+            "operationalState",
+            "routerId",
+            "asPointer",
+            "bgpAsPointer",
+            "protocolEventTypes",
+            "protocolRecord",
+            "bgpRibInfoLastRetrieveTime",
+            "bgpVpnv4RoutTargetLastRetrieveTime",
+        ],
+    )
+    assert body["find"]["fullClassName"] == "topology.Cpaa"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "filter" not in body["find"]
+    assert "bgpRibInfoLastRetrieveTime" in body["find"]["resultFilter"]["attribute"]
+
+
+def test_find_body_query13_rib_info_scoped_to_rt_fdn():
+    body = build_find_body(
+        "topology.BgpRibInfo",
+        None,
+        {"wildcard": {"name": "objectFullName", "value": "tpgy-mgr:AS-65000:RT-65000%10%"}},
+    )
+    assert body["find"]["fullClassName"] == "topology.BgpRibInfo"
+    assert body["find"]["resultFilter"] == {"children": ""}
+    assert "RT-65000%10" in body["find"]["filter"]["wildcard"]["value"]
+
+
+def test_rib_from_pref_addr_and_len():
+    svc = Service(10, "VPRN 10", "vprn", "Red_Ope", 10, [], mgr_id=1)
+    entry = _rib_from_row(
+        {
+            "prefAddr": "10.50.1.0",
+            "prefLen": "24",
+            "prefType": "vpnIpv4",
+            "prefRD": "65000:10",
+            "nextHop": "10.251.121.250",
+            "med": "0",
+            "localPref": "100",
+            "asPath": "65012",
+        },
+        svc,
+        "65000:10",
+        "BgpRibInfoValue",
+    )
+    assert entry is not None
+    assert entry.prefix == "10.50.1.0/24"
+    assert entry.next_hop == "10.251.121.250"
+    assert entry.as_path == "65012"
+    assert entry.source == "BgpRibInfoValue"
+
+
+def test_cpaa_from_row_protocol_bits():
+    cpaa = _cpaa_from_row(
+        {
+            "objectFullName": "network:10.251.243.250:cpaa",
+            "routerId": "10.251.243.250",
+            "bgpAsPointer": "tpgy-mgr:AS-65000",
+            "protocolRecord": {"bit": ["ospf", "ospfTe", "bgp"]},
+            "bgpRibInfoLastRetrieveTime": "1710000000",
+            "administrativeState": "up",
+            "operationalState": "up",
+        }
+    )
+    assert cpaa is not None
+    assert "bgp" in cpaa.protocol_record
+    assert cpaa.rib_retrieve == "1710000000"

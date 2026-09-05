@@ -17,6 +17,9 @@ from nsp_grok.models import (
     MplsPath,
     NetworkElement,
     Port,
+    BgpRibInfo,
+    BgpRibPrefix,
+    Cpaa,
     RouteNextHop,
     RouteTarget,
     Service,
@@ -748,6 +751,9 @@ class Store:
         self.bindings = seed_bindings()
         self.route_targets = seed_route_targets()
         self.route_next_hops: list[RouteNextHop] = []
+        self.bgp_rib: list[BgpRibPrefix] = []
+        self.bgp_rib_info: list[BgpRibInfo] = []
+        self.cpaa: list[Cpaa] = []
         self.static_routes = seed_static_routes()
         self.bgp_peers = seed_bgp_peers()
         self.macs = seed_macs()
@@ -909,3 +915,12 @@ class Store:
 
     def apply_macs(self, svc_id: int, macs: list[MacEntry]) -> None:
         self.macs = [m for m in self.macs if m.svc_id != svc_id] + list(macs)
+
+    def apply_bgp_rib(self, svc_id: int, prefixes: list[BgpRibPrefix]) -> None:
+        self.bgp_rib = [p for p in self.bgp_rib if p.svc_id != svc_id] + list(prefixes)
+
+    def apply_bgp_rib_info(self, svc_id: int, infos: list[BgpRibInfo]) -> None:
+        self.bgp_rib_info = [i for i in self.bgp_rib_info if i.svc_id != svc_id] + list(infos)
+
+    def apply_cpaa(self, cpaas: list[Cpaa]) -> None:
+        self.cpaa = list(cpaas)

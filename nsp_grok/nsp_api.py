@@ -16,6 +16,9 @@ from nsp_grok.models import (
     AccessInterface,
     Alarm,
     BgpPeer,
+    BgpRibInfo,
+    BgpRibPrefix,
+    Cpaa,
     Customer,
     Lsp,
     MacEntry,
@@ -25,6 +28,7 @@ from nsp_grok.models import (
     Service,
     ServiceSite,
     ServiceTunnel,
+    StatSample,
     StaticRoute,
 )
 
@@ -653,16 +657,203 @@ class NspClient:
                 out.append(mac)
         return out
 
+    def load_cpaa(self) -> list[Cpaa]:
+        """Query 10: topology.Cpaa with children empty and a short attribute list."""
+        rows = self._try_find(
+            ["topology.Cpaa"],
+            [
+                "objectFullName",
+                "displayedName",
+                "administrativeState",
+                "operationalState",
+                "routerId",
+                "asPointer",
+                "bgpAsPointer",
+                "protocolEventTypes",
+                "protocolRecord",
+                "bgpRibInfoLastRetrieveTime",
+                "bgpVpnv4RoutTargetLastRetrieveTime",
+            ],
+            None,
+        )
+        return [cpaa for row in rows if (cpaa := _cpaa_from_row(row))]
+
+    def load_bgp_rib_info(
+        self, svc: Service, route_targets: list[RouteTarget]
+    ) -> list[BgpRibInfo]:
+        """Query 13 parent: topology.BgpRibInfo scoped to AS/RT FDN, never unfiltered."""
+        if svc.svc_type != "vprn":
+            return []
+        out: list[BgpRibInfo] = []
+        seen: set[str] = set()
+        for wildcard in _rt_fdn_wildcards(route_targets, svc):
+            rows = self._try_find(
+                ["topology.BgpRibInfo"],
+                [
+                    "objectFullName",
+                    "displayedName",
+                    "asNumber",
+                    "nextHop",
+                    "med",
+                    "localPref",
+                    "peer",
+                    "originatorId",
+                    "numRoutes",
+                    "type",
+                ],
+                {"wildcard": {"name": "objectFullName", "value": wildcard}},
+            )
+            for row in rows:
+                info = _rib_info_from_row(row, svc)
+                if info is None or info.fdn in seen:
+                    continue
+                seen.add(info.fdn)
+                out.append(info)
+        return out
+
+    def load_bgp_rib(self, svc: Service, route_targets: list[RouteTarget]) -> list[BgpRibPrefix]:
+        """Queries 13 value + 14: prefixes for this VPRN only (RD/RT FDN), children empty."""
+        if svc.svc_type != "vprn":
+            return []
+        rds = _rds_of(svc, route_targets)
+        out: list[BgpRibPrefix] = []
+        seen: set[tuple[str, str, str]] = set()
+
+        def _take(rows: list[dict[str, Any]], rd: str, source: str) -> None:
+            for row in rows:
+                entry = _rib_from_row(row, svc, rd, source)
+                if entry is None:
+                    continue
+                key = (entry.rd, entry.prefix, entry.next_hop)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(entry)
+
+        for rd in rds:
+            q14 = {
+                "and": {
+                    "equal": [
+                        {"name": "prefType", "value": "vpnIpv4"},
+                        {"name": "prefRD", "value": rd},
+                    ]
+                }
+            }
+            _take(self._try_find(["topology.BgpMonitoredPrefix"], None, q14), rd, "BgpMonitoredPrefix")
+            q14b = {
+                "and": {
+                    "equal": [
+                        {"name": "prefType", "value": "vpnIpv4"},
+                        {"name": "prefRd", "value": rd},
+                    ]
+                }
+            }
+            _take(self._try_find(["topology.BgpMonitoredPrefix"], None, q14b), rd, "BgpMonitoredPrefix")
+            for wildcard in _rt_fdn_wildcards_for_rd(rd):
+                _take(
+                    self._try_find(
+                        ["topology.BgpRibInfoValue"],
+                        None,
+                        {"wildcard": {"name": "objectFullName", "value": wildcard}},
+                    ),
+                    rd,
+                    "BgpRibInfoValue",
+                )
+            _take(
+                self._try_find(
+                    ["topology.BgpRibInfoValue"],
+                    None,
+                    {"equal": {"name": "routeTargetString", "value": rd}},
+                ),
+                rd,
+                "BgpRibInfoValue",
+            )
+        return out
+
+    def load_stats(self, pointer: str, window_s: int = 900) -> list[StatSample]:
+        """On-demand stats log records (XML API: find + timeCaptured, children empty)."""
+        pointer = pointer.strip()
+        if not pointer:
+            return []
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        first = str(now_ms - window_s * 1000)
+        second = str(now_ms)
+        filt = {
+            "and": {
+                "equal": {"name": "monitoredObjectPointer", "value": pointer},
+                "between": {"name": "timeCaptured", "first": first, "second": second},
+            }
+        }
+        rows = self._optional_find(
+            [
+                "equipment.InterfaceAdditionalStatsLogRecord",
+                "equipment.InterfaceStatsLogRecord",
+                "mpls.MplsLspStatsLogRecord",
+            ],
+            None,
+            filt,
+        )
+        samples: list[StatSample] = []
+        for row in rows:
+            samples.extend(_stats_from_row(row, pointer))
+        return samples
+
     def _optional_find(
         self,
         classes: list[str],
         attributes: list[str] | None,
-        filter_: dict[str, Any],
+        filter_: dict[str, Any] | None,
     ) -> list[dict[str, Any]]:
         try:
-            return self._find_first_class(classes, attributes, filter_)
+            return self._find_first_class(classes, attributes, filter_ or {})
         except NspApiError:
             return []
+
+    def _try_find(
+        self,
+        classes: list[str],
+        attributes: list[str] | None,
+        filter_: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        rows = self._optional_find(classes, attributes, filter_)
+        if rows or not attributes:
+            return rows
+        return self._optional_find(classes, None, filter_)
+
+
+def _rds_of(svc: Service, route_targets: list[RouteTarget]) -> list[str]:
+    rds: list[str] = []
+    if svc.route_distinguisher:
+        rds.append(svc.route_distinguisher)
+    for rt in route_targets:
+        if rt.value and rt.value not in rds:
+            rds.append(rt.value)
+    return rds
+
+
+def _rt_token(rd: str) -> str:
+    left, sep, right = rd.partition(":")
+    if not sep:
+        return f"RT-{rd}"
+    return f"RT-{left}%{right}"
+
+
+def _rt_fdn_wildcards_for_rd(rd: str) -> list[str]:
+    token = _rt_token(rd)
+    left = rd.split(":", 1)[0]
+    return [
+        f"tpgy-mgr:AS-{left}:{token}%",
+        f"tpgy-mgr:AS-{left}:{token}:%",
+    ]
+
+
+def _rt_fdn_wildcards(route_targets: list[RouteTarget], svc: Service) -> list[str]:
+    out: list[str] = []
+    for rd in _rds_of(svc, route_targets):
+        for w in _rt_fdn_wildcards_for_rd(rd):
+            if w not in out:
+                out.append(w)
+    return out
 
 
 def _rt_matches_service(value: str, svc: Service) -> bool:
@@ -685,6 +876,7 @@ def _next_hop_from_row(
         route_target=rt,
         next_hop=nh,
         addr_type=str(row.get("nextHopAddrType") or "ipv4"),
+        cpaa_site_id=str(row.get("siteId") or ""),
     )
 
 
@@ -872,6 +1064,128 @@ def _mac_from_row(row: dict[str, Any], svc: Service) -> MacEntry | None:
     )
 
 
+def _rib_from_row(
+    row: dict[str, Any], svc: Service, rd: str, source: str
+) -> BgpRibPrefix | None:
+    addr = str(row.get("prefAddr") or row.get("prefix") or row.get("prefPrefix") or row.get("ipPrefix") or "").strip()
+    plen = _int_field(row, "prefLen", "prefixLength", "prefLength")
+    if addr and plen is not None and "/" not in addr:
+        prefix = f"{addr}/{plen}"
+    elif addr:
+        prefix = addr
+    else:
+        prefix = str(row.get("displayedName") or "").strip()
+        fdn = str(row.get("objectFullName") or "")
+        if not prefix or prefix.startswith("tpgy-mgr:"):
+            prefix = fdn.rsplit(":", 1)[-1] if fdn else ""
+    if not prefix or prefix in {"%", ""}:
+        return None
+    if prefix.startswith("tpgy-mgr:") or prefix.startswith("NH-"):
+        return None
+    return BgpRibPrefix(
+        svc_id=svc.svc_id,
+        prefix=prefix,
+        rd=str(row.get("prefRD") or row.get("prefRd") or row.get("routeDistinguisher") or rd),
+        pref_type=str(row.get("prefType") or "vpnIpv4"),
+        next_hop=str(row.get("nextHop") or row.get("nexthop") or ""),
+        source=source,
+        med=str(row.get("med") or row.get("MED") or ""),
+        local_pref=str(row.get("localPref") or row.get("LOCAL-PREF") or ""),
+        as_path=str(row.get("asPath") or row.get("asPathStr") or ""),
+        peer=str(row.get("peer") or row.get("peerIp") or ""),
+        originator_id=str(row.get("originatorId") or row.get("originatorID") or ""),
+    )
+
+
+def _bits(value: Any) -> str:
+    if isinstance(value, list):
+        return ",".join(str(v) for v in value)
+    if isinstance(value, dict):
+        bit = value.get("bit")
+        if isinstance(bit, list):
+            return ",".join(str(b) for b in bit)
+        if bit:
+            return str(bit)
+    return str(value or "")
+
+
+def _cpaa_from_row(row: dict[str, Any]) -> Cpaa | None:
+    fdn = str(row.get("objectFullName") or "")
+    if not fdn:
+        return None
+    return Cpaa(
+        fdn=fdn,
+        displayed_name=str(row.get("displayedName") or ""),
+        router_id=str(row.get("routerId") or ""),
+        bgp_as=str(row.get("bgpAsPointer") or ""),
+        protocol_record=_bits(row.get("protocolRecord")),
+        protocol_events=_bits(row.get("protocolEventTypes")),
+        rib_retrieve=str(row.get("bgpRibInfoLastRetrieveTime") or "0"),
+        rt_retrieve=str(row.get("bgpVpnv4RoutTargetLastRetrieveTime") or "0"),
+        admin=_state(row.get("administrativeState")),
+        oper=_state(row.get("operationalState")),
+    )
+
+
+def _rib_info_from_row(row: dict[str, Any], svc: Service) -> BgpRibInfo | None:
+    fdn = str(row.get("objectFullName") or "")
+    if not fdn:
+        return None
+    kind = str(row.get("type") or row.get("displayedName") or "rib").lower()
+    key = str(
+        row.get("nextHop")
+        or row.get("peer")
+        or row.get("originatorId")
+        or row.get("med")
+        or row.get("localPref")
+        or row.get("displayedName")
+        or fdn.rsplit(":", 1)[-1]
+    )
+    return BgpRibInfo(
+        svc_id=svc.svc_id,
+        fdn=fdn,
+        kind=kind,
+        key=key,
+        as_number=str(row.get("asNumber") or ""),
+        num_routes=_int_field(row, "numRoutes", "numberOfRoutes") or 0,
+    )
+
+
+_STATS_SKIP = {
+    "objectfullname",
+    "monitoredobjectpointer",
+    "timecaptured",
+    "id",
+    "displayedname",
+    "siteid",
+    "class",
+    "actionmask",
+    "self",
+    "children",
+}
+
+
+def _stats_from_row(row: dict[str, Any], pointer: str) -> list[StatSample]:
+    collected = _parse_time(row.get("timeCaptured") or row.get("collected"))
+    fdn = str(row.get("monitoredObjectPointer") or pointer)
+    samples: list[StatSample] = []
+    for key, raw in row.items():
+        if key.lower() in _STATS_SKIP:
+            continue
+        if isinstance(raw, dict):
+            continue
+        text = str(raw).strip()
+        if text == "" or text in {"true", "false"}:
+            continue
+        try:
+            value = float(text)
+        except ValueError:
+            continue
+        unit = "bytes" if "octet" in key.lower() else "pkts" if "pkt" in key.lower() or "packet" in key.lower() else ""
+        samples.append(StatSample(object_fdn=fdn, counter=key, value=value, unit=unit, collected=collected))
+    return samples
+
+
 def _port_from_pointer(pointer: str) -> str:
     if not pointer:
         return ""
@@ -885,7 +1199,8 @@ def _saps_from_rows(svc: Service, rows: list[dict[str, Any]]) -> list[AccessInte
     for row in rows:
         fdn = str(row.get("objectFullName") or "")
         name = str(row.get("displayedName") or fdn.rsplit(":", 1)[-1])
-        port = _port_from_pointer(str(row.get("portPointer") or "")) or name
+        pointer = str(row.get("portPointer") or "")
+        port = _port_from_pointer(pointer) or name
         site_id = str(row.get("siteId") or "")
         if not site_id and fdn.startswith(svc.fdn + ":"):
             rest = fdn[len(svc.fdn) + 1 :]
@@ -901,6 +1216,7 @@ def _saps_from_rows(svc: Service, rows: list[dict[str, Any]]) -> list[AccessInte
                 admin=_state(row.get("administrativeState")),
                 oper=_state(row.get("operationalState")),
                 mgr_id=svc.mgr_id,
+                port_pointer=pointer,
             )
         )
     return saps

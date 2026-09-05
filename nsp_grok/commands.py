@@ -177,6 +177,7 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
     try:
         if path[:1] != ["customers"]:
             return None
+        ctx.store.apply_cpaa(ctx.client.load_cpaa())
         if len(path) == 1:
             ctx.store.apply_customers(ctx.client.load_customers())
             ctx.rebuild()
@@ -202,6 +203,12 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
                     )
                     ctx.store.apply_route_next_hops(
                         sid, ctx.client.load_route_next_hops(svc, rts)
+                    )
+                    ctx.store.apply_bgp_rib(
+                        sid, ctx.client.load_bgp_rib(svc, rts)
+                    )
+                    ctx.store.apply_bgp_rib_info(
+                        sid, ctx.client.load_bgp_rib_info(svc, rts)
                     )
                 ctx.store.apply_sites_saps(sid, sites, saps)
                 bindings = ctx.client.load_sdp_bindings(svc)
@@ -673,10 +680,44 @@ def _alarm_mutate(ctx: Ctx, alarm_id: str, ack: bool = False, clear: bool = Fals
 def _stats(ctx: Ctx, args: list[str]) -> Outcome:
     if not args:
         return Outcome(
-            error="uso: stats <fdn>   ej. stats ne:PE-BAIRES-01:port:1/1/1  o  stats lsp:lsp-ba-cba"
+            error=(
+                "uso: stats <fdn>   ej. stats ne:PE-BAIRES-01:port:1/1/1  "
+                "o  stats lsp:lsp-ba-cba  o  stats network:<NE>:...:port-3"
+            )
         )
     fdn = args[0]
+    if ctx.live and ctx.client is not None:
+        pointer = _stats_pointer(ctx, fdn)
+        samples = ctx.client.load_stats(pointer)
+        if samples:
+            return Outcome(renderable=render.stats_table(samples, pointer))
+        lab = render.stats_table(ctx.store.stats, fdn)
+        note = (
+            "Live: sin log records (hace falta política MIB y timeCaptured reciente). "
+            f"Puntero {pointer}. children=\"\" + filtro and/equal/between."
+        )
+        return Outcome(renderable=Group(render.stats_table(samples, pointer), Text(note, style="yellow"), lab))
     return Outcome(renderable=render.stats_table(ctx.store.stats, fdn))
+
+
+def _stats_pointer(ctx: Ctx, fdn: str) -> str:
+    if fdn.startswith(("network:", "svc-mgr:", "svt:")):
+        return fdn
+    if fdn.startswith("lsp:"):
+        name = fdn.split(":", 1)[1]
+        lsp = ctx.store.lsps.get(name)
+        if lsp:
+            return f"network:{lsp.from_ne}:dynamicLsp-{lsp.name}"
+        return fdn
+    if fdn.startswith("ne:") and ":port:" in fdn:
+        parts = fdn.split(":")
+        # ne:NAME:port:1/1/1
+        name = parts[1] if len(parts) > 1 else ""
+        port = fdn.split(":port:", 1)[-1]
+        ne = ctx.store.nes.get(name)
+        if ne:
+            return f"network:{ne.system_ip}:{port}"
+    return fdn
 
 
 def _resync(ctx: Ctx, args: list[str]) -> Outcome:
@@ -728,6 +769,14 @@ def _status(ctx: Ctx, args: list[str]) -> Outcome:
         ("Backend", "NSP en vivo" if ctx.live else "lab local"),
         ("Debug HTTP", "on" if ctx.debug else "off"),
     ]
+    for cpaa in ctx.store.cpaa:
+        rec = cpaa.protocol_record or "—"
+        rows.append(
+            (
+                "CPAA",
+                f"{cpaa.fdn}  record={rec}  RIB={cpaa.rib_retrieve}  RT={cpaa.rt_retrieve}",
+            )
+        )
     return Outcome(renderable=render.kv_table(rows, title="Sesión"))
 
 
