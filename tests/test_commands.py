@@ -125,6 +125,12 @@ class _BoomClient:
     def load_cpaa(self):
         return []
 
+    def load_igp_domains(self):
+        return []
+
+    def load_bgp_ases(self):
+        return []
+
     def load_customers(self):
         raise NspApiError("timeout de 60s al consultar https://172.24.80.28/nfmpv3service/api/v3/find")
 
@@ -133,12 +139,24 @@ class _CancelClient:
     def load_cpaa(self):
         return []
 
+    def load_igp_domains(self):
+        return []
+
+    def load_bgp_ases(self):
+        return []
+
     def load_customers(self):
         raise UserCancelled("Cancelado con Ctrl-C.")
 
 
 class _UnexpectedClient:
     def load_cpaa(self):
+        return []
+
+    def load_igp_domains(self):
+        return []
+
+    def load_bgp_ases(self):
         return []
 
     def load_customers(self):

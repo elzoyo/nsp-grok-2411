@@ -20,6 +20,7 @@ from nsp_grok.models import (
     BgpRibPrefix,
     Cpaa,
     Customer,
+    TopologyAs,
     Lsp,
     MacEntry,
     RouteNextHop,
@@ -678,6 +679,39 @@ class NspClient:
         )
         return [cpaa for row in rows if (cpaa := _cpaa_from_row(row))]
 
+    def load_igp_domains(self) -> list[TopologyAs]:
+        """Query 11: topology.AutonomousSystem — cabecera IGP, children empty (sin LSDB)."""
+        rows = self._try_find(
+            ["topology.AutonomousSystem"],
+            [
+                "objectFullName",
+                "displayedName",
+                "asNumber",
+                "description",
+                "bgpTopologyEnabled",
+                "cpaaPointers",
+            ],
+            None,
+        )
+        return [d for row in rows if (d := _topology_as_from_row(row, "igp"))]
+
+    def load_bgp_ases(self) -> list[TopologyAs]:
+        """Query 12: topology.BgpAutonomousSystem — cabecera BGP, children empty (sin RT/NH)."""
+        rows = self._try_find(
+            ["topology.BgpAutonomousSystem"],
+            [
+                "objectFullName",
+                "displayedName",
+                "asNumber",
+                "asType",
+                "description",
+                "igpAdminDomain",
+                "cpaaPointers",
+            ],
+            None,
+        )
+        return [d for row in rows if (d := _topology_as_from_row(row, "bgp"))]
+
     def load_bgp_rib_info(
         self, svc: Service, route_targets: list[RouteTarget]
     ) -> list[BgpRibInfo]:
@@ -1107,6 +1141,23 @@ def _bits(value: Any) -> str:
         if bit:
             return str(bit)
     return str(value or "")
+
+
+def _topology_as_from_row(row: dict[str, Any], kind: str) -> TopologyAs | None:
+    fdn = str(row.get("objectFullName") or "")
+    if not fdn:
+        return None
+    return TopologyAs(
+        fdn=fdn,
+        kind=kind,
+        displayed_name=str(row.get("displayedName") or ""),
+        as_number=str(row.get("asNumber") or ""),
+        as_type=str(row.get("asType") or ""),
+        description=str(row.get("description") or ""),
+        bgp_topology_enabled=str(row.get("bgpTopologyEnabled") or ""),
+        igp_admin_domain=str(row.get("igpAdminDomain") or ""),
+        cpaa_pointers=_bits(row.get("cpaaPointers")),
+    )
 
 
 def _cpaa_from_row(row: dict[str, Any]) -> Cpaa | None:

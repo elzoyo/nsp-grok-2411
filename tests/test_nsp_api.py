@@ -600,3 +600,38 @@ def test_cpaa_from_row_protocol_bits():
     assert cpaa is not None
     assert "bgp" in cpaa.protocol_record
     assert cpaa.rib_retrieve == "1710000000"
+
+
+def test_find_body_query11_igp_as_no_lsdb():
+    body = build_find_body(
+        "topology.AutonomousSystem",
+        [
+            "objectFullName",
+            "displayedName",
+            "asNumber",
+            "description",
+            "bgpTopologyEnabled",
+            "cpaaPointers",
+        ],
+    )
+    assert body["find"]["fullClassName"] == "topology.AutonomousSystem"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "filter" not in body["find"]
+
+
+def test_find_body_query12_bgp_as_header_only():
+    body = build_find_body(
+        "topology.BgpAutonomousSystem",
+        [
+            "objectFullName",
+            "displayedName",
+            "asNumber",
+            "asType",
+            "description",
+            "igpAdminDomain",
+            "cpaaPointers",
+        ],
+    )
+    assert body["find"]["fullClassName"] == "topology.BgpAutonomousSystem"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "filter" not in body["find"]

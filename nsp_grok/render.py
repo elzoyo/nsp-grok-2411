@@ -27,6 +27,7 @@ from nsp_grok.models import (
     BgpRibPrefix,
     Cpaa,
     RouteNextHop,
+    TopologyAs,
     RouteTarget,
     Service,
     ServiceSite,
@@ -145,6 +146,26 @@ def show_object(payload: Any, kind: str) -> RenderableType:
         return show_sap(payload)
     if isinstance(payload, SdpBinding):
         return show_binding(payload)
+    if isinstance(payload, TopologyAs):
+        return kv_table(
+            [
+                (
+                    "Clase",
+                    "topology.AutonomousSystem"
+                    if payload.kind == "igp"
+                    else "topology.BgpAutonomousSystem",
+                ),
+                ("objectFullName", payload.fdn),
+                ("displayedName", payload.displayed_name),
+                ("asNumber", payload.as_number),
+                ("asType", payload.as_type or "—"),
+                ("description", payload.description or "—"),
+                ("bgpTopologyEnabled", payload.bgp_topology_enabled or "—"),
+                ("igpAdminDomain", payload.igp_admin_domain or "—"),
+                ("cpaaPointers", payload.cpaa_pointers or "—"),
+            ],
+            title="AS IGP (query 11)" if payload.kind == "igp" else "AS BGP (query 12)",
+        )
     if isinstance(payload, Cpaa):
         return kv_table(
             [

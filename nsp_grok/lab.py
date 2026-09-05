@@ -21,6 +21,7 @@ from nsp_grok.models import (
     BgpRibPrefix,
     Cpaa,
     RouteNextHop,
+    TopologyAs,
     RouteTarget,
     Service,
     ServiceSite,
@@ -754,6 +755,8 @@ class Store:
         self.bgp_rib: list[BgpRibPrefix] = []
         self.bgp_rib_info: list[BgpRibInfo] = []
         self.cpaa: list[Cpaa] = []
+        self.igp_ases: list[TopologyAs] = []
+        self.bgp_ases: list[TopologyAs] = []
         self.static_routes = seed_static_routes()
         self.bgp_peers = seed_bgp_peers()
         self.macs = seed_macs()
@@ -924,3 +927,9 @@ class Store:
 
     def apply_cpaa(self, cpaas: list[Cpaa]) -> None:
         self.cpaa = list(cpaas)
+
+    def apply_igp_ases(self, domains: list[TopologyAs]) -> None:
+        self.igp_ases = list(domains)
+
+    def apply_bgp_ases(self, ases: list[TopologyAs]) -> None:
+        self.bgp_ases = list(ases)

@@ -178,6 +178,8 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
         if path[:1] != ["customers"]:
             return None
         ctx.store.apply_cpaa(ctx.client.load_cpaa())
+        ctx.store.apply_igp_ases(ctx.client.load_igp_domains())
+        ctx.store.apply_bgp_ases(ctx.client.load_bgp_ases())
         if len(path) == 1:
             ctx.store.apply_customers(ctx.client.load_customers())
             ctx.rebuild()
@@ -769,6 +771,12 @@ def _status(ctx: Ctx, args: list[str]) -> Outcome:
         ("Backend", "NSP en vivo" if ctx.live else "lab local"),
         ("Debug HTTP", "on" if ctx.debug else "off"),
     ]
+    if ctx.store.igp_ases:
+        igp = ctx.store.igp_ases[0]
+        rows.append(("AS IGP", f"{igp.displayed_name or igp.fdn}  asNumber={igp.as_number}"))
+    if ctx.store.bgp_ases:
+        bgp = ctx.store.bgp_ases[0]
+        rows.append(("AS BGP", f"{bgp.displayed_name or bgp.fdn}  asNumber={bgp.as_number}"))
     for cpaa in ctx.store.cpaa:
         rec = cpaa.protocol_record or "—"
         rows.append(

@@ -282,6 +282,21 @@ class BgpPeer:
 
 
 @dataclass
+class TopologyAs:
+    """Query 11 topology.AutonomousSystem or query 12 topology.BgpAutonomousSystem."""
+
+    fdn: str
+    kind: str  # igp | bgp
+    displayed_name: str = ""
+    as_number: str = ""
+    as_type: str = ""
+    description: str = ""
+    bgp_topology_enabled: str = ""
+    igp_admin_domain: str = ""
+    cpaa_pointers: str = ""
+
+
+@dataclass
 class Cpaa:
     """Query 10: topology.Cpaa — recolector CPAM."""
 

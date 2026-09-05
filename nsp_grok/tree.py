@@ -116,6 +116,34 @@ def build_tree(store: Store, user: User) -> Node:
         alarms=_folder("alarms", "Fallas", **alarm_kids),
         stats=_folder("stats", "Estadísticas"),
         admin=_folder("admin", "Usuarios y seguridad", **admin_kids),
+        **{
+            "igp-as": _folder(
+                "igp-as",
+                "topology.AutonomousSystem (query 11, sin LSDB)",
+                **{
+                    (d.as_number or d.fdn.rsplit("-", 1)[-1] or str(i)): _leaf(
+                        d.as_number or d.fdn.rsplit("-", 1)[-1] or str(i),
+                        "igp-as",
+                        d,
+                        d.displayed_name or d.fdn,
+                    )
+                    for i, d in enumerate(store.igp_ases)
+                },
+            ),
+            "bgp-as": _folder(
+                "bgp-as",
+                "topology.BgpAutonomousSystem (query 12)",
+                **{
+                    (d.as_number or str(i)): _leaf(
+                        d.as_number or str(i),
+                        "bgp-as",
+                        d,
+                        d.displayed_name or d.fdn,
+                    )
+                    for i, d in enumerate(store.bgp_ases)
+                },
+            ),
+        },
     )
     return root
 

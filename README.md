@@ -45,7 +45,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 - VPRN live: máscara (`rtr.VirtualRouterIpAddress`), estáticas, `bgp.Site`, RT CPAM y next-hops (query 16).
 - Live SDP binding (`vprn/vpls/epipe.SdpBinding`) al entrar al servicio.
 - Live `svt.Tunnel` (por SDP id), `mpls.DynamicLsp`, `fm.AlarmObject` (FDN del servicio) y MAC VPLS.
-- Live CPAM: query 10 (`topology.Cpaa`), 13 (`BgpRibInfo` + `BgpRibInfoValue` por FDN `RT-AS%id`) y 14 (`BgpMonitoredPrefix`). Stats on-demand (`timeCaptured`).
+- Live CPAM: queries 10–14 (Cpaa, AS IGP, AS BGP, RIB/RT). Stats on-demand (`timeCaptured`).
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -62,11 +62,13 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 | BGP del VR (`bgp.Site`) | 9 | live (config, no RIB) |
 | RT CPAM (`topology.BgpRoutesRouteTarget`) | 15 | live; NH count en el RT |
 | Next-hops por RT | 16 | live (`topology.BgpRoutesNextHop`; ignora 0.0.0.0) |
+| AS IGP | 11 | live `topology.AutonomousSystem` cabecera (`children: ""`, sin LSDB) |
+| AS BGP | 12 | live `topology.BgpAutonomousSystem` cabecera |
 | RIB BGP | 10, 13–14 | live completo: CPAA, BgpRibInfo (FDN RT), BgpRibInfoValue + BgpMonitoredPrefix; no dump global |
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto:** primera instancia solo lectura — no crear servicios. MPLS create/shutdown sigue siendo del lab. Query 17 (`configureInstance` al CPAA para grabar BGP) no se ejecuta.
+**Producto (no es find de lectura):** primera instancia solo lectura — no crear servicios. MPLS create/shutdown sigue siendo del lab. Query 17 (`configureInstance` al CPAA) no se ejecuta: es escritura.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 
