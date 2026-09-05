@@ -41,7 +41,8 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 
 - Shell `user@IP>`, login OAuth2, fallback a lab, `--debug`, timeout 60 s, Ctrl-C con mensaje y cierre.
 - Navegación cliente → VPRN/VPLS/Epipe → servicio.
-- Live SAM-O: `subscr.Subscriber`, servicios por `subscriberPointer`, `*.Site`, SAP L3/L2.
+- Live SAM-O: `subscr.Subscriber`, servicios por `subscriberPointer`, `*.Site`, SAP L3/L2 (`portPointer`).
+- VPRN live: máscara (`rtr.VirtualRouterIpAddress`), estáticas, `bgp.Site`, RT CPAM.
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -53,19 +54,20 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 
 | Dato | Query | Estado |
 |---|---|---|
-| Máscara de SAP (`rtr.VirtualRouterIpAddress`) | 7 | no |
-| Rutas estáticas (`rtr.StaticRoute`) | 8 | carpeta lab vacía en vivo |
-| BGP del VR (`bgp.Site`) | 9 | igual |
-| RT / next-hops CPAM | 15–16 | igual |
+| Máscara de SAP (`rtr.VirtualRouterIpAddress`) | 7 | live al entrar al VPRN |
+| Rutas estáticas (`rtr.StaticRoute`) | 8 | live (`network:<NE>:vprn-<serviceId>:%`) |
+| BGP del VR (`bgp.Site`) | 9 | live (config, no RIB) |
+| RT CPAM (`topology.BgpRoutesRouteTarget`) | 15 | live; NH count en el RT |
+| Next-hops por RT | 16 | no (solo `numNextHops`) |
 | RIB BGP | 13–14 | vacío en ese NFM-P; no es `show router` |
 
 **Live, en el árbol pero sin HTTP:** SDP bindings, túneles, LSPs, alarmas `fm`, stats, MAC VPLS.
 
 **Producto:** primera instancia solo lectura — no crear servicios. MPLS create/shutdown sigue siendo del lab.
 
-**Deuda chica:** SAP live usa el nombre como puerto; falta `portPointer`.
+**Deuda chica:** SAP live usa `portPointer` (último componente del FDN). Query 16 (lista de NH) no se pide; se muestra `numNextHops`.
 
-Lo más natural a continuación, según las queries SAM-O: VPRN en vivo (máscara, estáticas, BGP del VR y RT/NH).
+Siguiente: query 16 si hace falta ver PEs, o live de SDP / alarmas `fm`.
 
 ## Retomar la sesión Grok Build
 

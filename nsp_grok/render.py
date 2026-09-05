@@ -146,6 +146,7 @@ def show_object(payload: Any, kind: str) -> RenderableType:
             [
                 ("Dirección", payload.direction),
                 ("Route Target", payload.value),
+                ("Next-hops (CPAM)", payload.num_next_hops),
                 ("Servicio", payload.svc_id),
             ]
         )

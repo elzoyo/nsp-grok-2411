@@ -187,7 +187,10 @@ def _service_node(svc, store: Store, user: User) -> Node:
     if svc.svc_type == "vprn":
         rt_kids = {
             f"{rt.direction}-{rt.value.replace(':', '-')}": _leaf(
-                f"{rt.direction}-{rt.value.replace(':', '-')}", "rt", rt, rt.value
+                f"{rt.direction}-{rt.value.replace(':', '-')}",
+                "rt",
+                rt,
+                f"{rt.value}  nh={rt.num_next_hops}" if rt.num_next_hops else rt.value,
             )
             for rt in store.route_targets
             if rt.svc_id == svc.svc_id

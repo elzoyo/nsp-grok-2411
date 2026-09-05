@@ -190,7 +190,15 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
             svc = ctx.store.services.get(sid)
             if svc is not None:
                 sites = ctx.client.load_sites(svc)
-                saps = ctx.client.load_saps(svc)
+                saps = ctx.client.load_saps(svc, sites)
+                if svc.svc_type == "vprn":
+                    saps = ctx.client.apply_vr_masks(svc, sites, saps)
+                    ctx.store.apply_vprn_related(
+                        sid,
+                        static_routes=ctx.client.load_static_routes(svc, sites),
+                        bgp_peers=ctx.client.load_bgp_sites(svc, sites),
+                        route_targets=ctx.client.load_route_targets(svc),
+                    )
                 ctx.store.apply_sites_saps(sid, sites, saps)
         ctx.rebuild()
     except UserCancelled:

@@ -855,3 +855,21 @@ class Store:
         svc = self.services.get(svc_id)
         if svc is not None:
             svc.sites = [site.ne for site in sites]
+
+    def apply_vprn_related(
+        self,
+        svc_id: int,
+        static_routes: list[StaticRoute] | None = None,
+        bgp_peers: list[BgpPeer] | None = None,
+        route_targets: list[RouteTarget] | None = None,
+    ) -> None:
+        if static_routes is not None:
+            self.static_routes = [s for s in self.static_routes if s.svc_id != svc_id] + list(
+                static_routes
+            )
+        if bgp_peers is not None:
+            self.bgp_peers = [p for p in self.bgp_peers if p.svc_id != svc_id] + list(bgp_peers)
+        if route_targets is not None:
+            self.route_targets = [r for r in self.route_targets if r.svc_id != svc_id] + list(
+                route_targets
+            )

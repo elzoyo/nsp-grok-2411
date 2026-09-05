@@ -244,6 +244,7 @@ class RouteTarget:
     svc_id: int
     direction: str
     value: str
+    num_next_hops: int = 0
 
 
 @dataclass
