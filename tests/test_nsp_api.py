@@ -2,6 +2,8 @@ import pytest
 
 from nsp_grok.nsp_api import (
     NspApiError,
+    _binding_from_row,
+    _next_hop_from_row,
     _rt_matches_service,
     _saps_from_rows,
     _service_from_row,
@@ -274,3 +276,80 @@ def test_rt_match_does_not_confuse_10_and_110():
     assert not _rt_matches_service("65000:110", svc10)
     assert _rt_matches_service("65000:110", svc110)
     assert not _rt_matches_service("65000:10", svc110)
+
+
+def test_find_body_query16_next_hop():
+    body = build_find_body(
+        "topology.BgpRoutesNextHop",
+        [
+            "objectFullName",
+            "nextHop",
+            "nextHopAddrType",
+            "routeTargetString",
+            "siteId",
+        ],
+        {"equal": {"name": "routeTargetString", "value": "65000:10"}},
+    )
+    assert body["find"]["fullClassName"] == "topology.BgpRoutesNextHop"
+    assert body["find"]["filter"]["equal"]["value"] == "65000:10"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "nextHop" in body["find"]["resultFilter"]["attribute"]
+    assert "attribute" in body["find"]["resultFilter"]
+
+
+def test_next_hop_ignores_null_and_keeps_pe_ip():
+    svc = Service(10, "VPRN 10", "vprn", "Red_Ope", 10, [], mgr_id=1)
+    assert (
+        _next_hop_from_row(
+            {"nextHop": "0.0.0.0", "routeTargetString": "65000:10"}, svc, "65000:10"
+        )
+        is None
+    )
+    nh = _next_hop_from_row(
+        {
+            "objectFullName": "tpgy-mgr:AS-65000:RT-65000%10:NH-10.251.121.250-Type-ipv4",
+            "nextHop": "10.251.121.250",
+            "nextHopAddrType": "ipv4",
+            "routeTargetString": "65000:10",
+            "siteId": "10.251.243.250",
+        },
+        svc,
+        "65000:10",
+    )
+    assert nh is not None
+    assert nh.next_hop == "10.251.121.250"
+    assert nh.route_target == "65000:10"
+    assert nh.svc_id == 10
+
+
+def test_find_body_sdp_binding_wildcard():
+    body = build_find_body(
+        "vprn.SdpBinding",
+        None,
+        {"wildcard": {"name": "objectFullName", "value": "svc-mgr:service-1:%"}},
+    )
+    assert body["find"]["fullClassName"] == "vprn.SdpBinding"
+    assert body["find"]["resultFilter"] == {"children": ""}
+    assert body["find"]["filter"]["wildcard"]["value"] == "svc-mgr:service-1:%"
+
+
+def test_binding_from_row_parses_sdp_and_site():
+    svc = Service(10, "VPRN 10", "vprn", "Red_Ope", 10, [], mgr_id=1)
+    b = _binding_from_row(
+        {
+            "objectFullName": "svc-mgr:service-1:10.251.121.250:sdp-101",
+            "siteId": "10.251.121.250",
+            "sdpId": "101",
+            "vcId": "10",
+            "type": "spoke",
+            "administrativeState": "up",
+            "operationalState": "up",
+        },
+        svc,
+    )
+    assert b is not None
+    assert b.sdp_id == 101
+    assert b.vc_id == 10
+    assert b.site_id == "10.251.121.250"
+    assert b.mgr_id == 1
+    assert b.fdn == "svc-mgr:service-1:10.251.121.250:sdp-101"

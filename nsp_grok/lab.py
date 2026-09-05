@@ -17,6 +17,7 @@ from nsp_grok.models import (
     MplsPath,
     NetworkElement,
     Port,
+    RouteNextHop,
     RouteTarget,
     Service,
     ServiceSite,
@@ -746,6 +747,7 @@ class Store:
         self.saps = seed_saps()
         self.bindings = seed_bindings()
         self.route_targets = seed_route_targets()
+        self.route_next_hops: list[RouteNextHop] = []
         self.static_routes = seed_static_routes()
         self.bgp_peers = seed_bgp_peers()
         self.macs = seed_macs()
@@ -873,3 +875,9 @@ class Store:
             self.route_targets = [r for r in self.route_targets if r.svc_id != svc_id] + list(
                 route_targets
             )
+
+    def apply_route_next_hops(self, svc_id: int, hops: list[RouteNextHop]) -> None:
+        self.route_next_hops = [h for h in self.route_next_hops if h.svc_id != svc_id] + list(hops)
+
+    def apply_bindings(self, svc_id: int, bindings: list[SdpBinding]) -> None:
+        self.bindings = [b for b in self.bindings if b.svc_id != svc_id] + list(bindings)

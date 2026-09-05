@@ -23,6 +23,7 @@ from nsp_grok.models import (
     MplsPath,
     NetworkElement,
     Port,
+    RouteNextHop,
     RouteTarget,
     Service,
     ServiceSite,
@@ -149,6 +150,17 @@ def show_object(payload: Any, kind: str) -> RenderableType:
                 ("Next-hops (CPAM)", payload.num_next_hops),
                 ("Servicio", payload.svc_id),
             ]
+        )
+    if isinstance(payload, RouteNextHop):
+        return kv_table(
+            [
+                ("Clase", "topology.BgpRoutesNextHop"),
+                ("Route Target", payload.route_target),
+                ("nextHop (PE)", payload.next_hop),
+                ("nextHopAddrType", payload.addr_type),
+                ("Servicio", payload.svc_id),
+            ],
+            title="Next-hop VPN (CPAM)",
         )
     if isinstance(payload, StaticRoute):
         return kv_table(
@@ -692,7 +704,7 @@ def help_text() -> RenderableType:
         ("tunnels", "svt.Tunnel (SDP)"),
         ("lsps", "mpls.DynamicLsp de esos SDP"),
         ("alarms", "fm.AlarmObject del servicio"),
-        ("route-targets / static-routes / bgp-peers", "solo VPRN"),
+        ("route-targets / static-routes / bgp-peers", "solo VPRN; NH CPAM bajo cada RT"),
         ("mac-table", "VPLS FIB / ProxyArpNdMacAddress"),
     ]:
         related.add_row(cmd, desc)

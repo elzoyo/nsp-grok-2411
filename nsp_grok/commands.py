@@ -193,13 +193,18 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
                 saps = ctx.client.load_saps(svc, sites)
                 if svc.svc_type == "vprn":
                     saps = ctx.client.apply_vr_masks(svc, sites, saps)
+                    rts = ctx.client.load_route_targets(svc)
                     ctx.store.apply_vprn_related(
                         sid,
                         static_routes=ctx.client.load_static_routes(svc, sites),
                         bgp_peers=ctx.client.load_bgp_sites(svc, sites),
-                        route_targets=ctx.client.load_route_targets(svc),
+                        route_targets=rts,
+                    )
+                    ctx.store.apply_route_next_hops(
+                        sid, ctx.client.load_route_next_hops(svc, rts)
                     )
                 ctx.store.apply_sites_saps(sid, sites, saps)
+                ctx.store.apply_bindings(sid, ctx.client.load_sdp_bindings(svc))
         ctx.rebuild()
     except UserCancelled:
         raise

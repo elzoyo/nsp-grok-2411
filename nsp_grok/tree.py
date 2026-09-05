@@ -185,16 +185,23 @@ def _service_node(svc, store: Store, user: User) -> Node:
     }
     extra: dict[str, Node] = {}
     if svc.svc_type == "vprn":
-        rt_kids = {
-            f"{rt.direction}-{rt.value.replace(':', '-')}": _leaf(
-                f"{rt.direction}-{rt.value.replace(':', '-')}",
-                "rt",
-                rt,
-                f"{rt.value}  nh={rt.num_next_hops}" if rt.num_next_hops else rt.value,
+        nhs_by_rt: dict[str, dict] = {}
+        for nh in store.route_next_hops:
+            if nh.svc_id != svc.svc_id:
+                continue
+            key = nh.next_hop.replace(".", "-")
+            nhs_by_rt.setdefault(nh.route_target, {})[key] = _leaf(
+                key, "rt-nh", nh, nh.next_hop
             )
-            for rt in store.route_targets
-            if rt.svc_id == svc.svc_id
-        }
+        rt_kids = {}
+        for rt in store.route_targets:
+            if rt.svc_id != svc.svc_id:
+                continue
+            name = f"{rt.direction}-{rt.value.replace(':', '-')}"
+            label = f"{rt.value}  nh={rt.num_next_hops}" if rt.num_next_hops else rt.value
+            rt_kids[name] = Node(
+                name, "rt", label, rt, nhs_by_rt.get(rt.value, {})
+            )
         sr_kids = {
             sr.prefix.replace("/", "-"): _leaf(sr.prefix.replace("/", "-"), "static-route", sr, sr.next_hop)
             for sr in store.static_routes

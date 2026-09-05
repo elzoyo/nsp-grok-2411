@@ -248,6 +248,19 @@ class RouteTarget:
 
 
 @dataclass
+class RouteNextHop:
+    """Query 16: topology.BgpRoutesNextHop — PE that announces the RT.
+
+    next_hop is the PE system IP. site_id in SAM-O is the CPAA, not the PE.
+    """
+
+    svc_id: int
+    route_target: str
+    next_hop: str
+    addr_type: str = "ipv4"
+
+
+@dataclass
 class StaticRoute:
     svc_id: int
     site_id: str

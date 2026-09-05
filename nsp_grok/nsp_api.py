@@ -15,7 +15,9 @@ from nsp_grok.models import (
     AccessInterface,
     BgpPeer,
     Customer,
+    RouteNextHop,
     RouteTarget,
+    SdpBinding,
     Service,
     ServiceSite,
     StaticRoute,
@@ -489,6 +491,60 @@ class NspClient:
             )
         return out
 
+    def load_route_next_hops(
+        self, svc: Service, route_targets: list[RouteTarget]
+    ) -> list[RouteNextHop]:
+        """Query 16: topology.BgpRoutesNextHop filtered by routeTargetString."""
+        if svc.svc_type != "vprn":
+            return []
+        attrs = [
+            "objectFullName",
+            "nextHop",
+            "nextHopAddrType",
+            "routeTargetString",
+            "siteId",
+        ]
+        out: list[RouteNextHop] = []
+        seen: set[tuple[str, str]] = set()
+        for rt in route_targets:
+            rows = self.find(
+                "topology.BgpRoutesNextHop",
+                attrs,
+                {"equal": {"name": "routeTargetString", "value": rt.value}},
+            )
+            for row in rows:
+                nh = _next_hop_from_row(row, svc, rt.value)
+                if nh is None:
+                    continue
+                key = (nh.route_target, nh.next_hop)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(nh)
+        return out
+
+    def load_sdp_bindings(self, svc: Service) -> list[SdpBinding]:
+        """SDP binding under the service FDN (same wildcard contract as vprn.Site)."""
+        if svc.svc_type == "vprn":
+            classes = ["vprn.SdpBinding"]
+        elif svc.svc_type == "vpls":
+            classes = ["vpls.SdpBinding"]
+        else:
+            classes = ["epipe.SdpBinding", "vll.SdpBinding"]
+        filt = {
+            "wildcard": {"name": "objectFullName", "value": f"{svc.fdn}:%"}
+        }
+        try:
+            rows = self._find_first_class(classes, None, filt)
+        except NspApiError:
+            return []
+        out: list[SdpBinding] = []
+        for row in rows:
+            binding = _binding_from_row(row, svc)
+            if binding:
+                out.append(binding)
+        return out
+
 
 def _rt_matches_service(value: str, svc: Service) -> bool:
     if not value:
@@ -496,6 +552,59 @@ def _rt_matches_service(value: str, svc: Service) -> bool:
     if svc.route_distinguisher and value == svc.route_distinguisher:
         return True
     return value.endswith(f":{svc.svc_id}")
+
+
+def _next_hop_from_row(
+    row: dict[str, Any], svc: Service, route_target: str
+) -> RouteNextHop | None:
+    nh = str(row.get("nextHop") or "").strip()
+    if not nh or nh == "0.0.0.0":
+        return None
+    rt = str(row.get("routeTargetString") or route_target)
+    return RouteNextHop(
+        svc_id=svc.svc_id,
+        route_target=rt,
+        next_hop=nh,
+        addr_type=str(row.get("nextHopAddrType") or "ipv4"),
+    )
+
+
+def _sdp_id_from_row(row: dict[str, Any]) -> int | None:
+    sid = _int_field(row, "sdpId", "sdpID")
+    if sid is not None:
+        return sid
+    pointer = str(row.get("sdpPointer") or row.get("objectFullName") or "")
+    for part in reversed(pointer.replace("/", ":").split(":")):
+        text = part.lower().replace("sdp-", "").replace("sdp", "")
+        if text.isdigit():
+            return int(text)
+    return None
+
+
+def _binding_from_row(row: dict[str, Any], svc: Service) -> SdpBinding | None:
+    fdn = str(row.get("objectFullName") or "")
+    site_id = str(row.get("siteId") or "")
+    if not site_id and fdn.startswith(svc.fdn + ":"):
+        site_id = fdn[len(svc.fdn) + 1 :].split(":", 1)[0]
+    sdp_id = _sdp_id_from_row(row)
+    if sdp_id is None:
+        return None
+    raw_type = str(row.get("type") or row.get("bindingType") or row.get("sdpBindingType") or "")
+    btype = raw_type.lower() or "spoke"
+    if "mesh" in btype:
+        btype = "mesh"
+    elif "spoke" in btype:
+        btype = "spoke"
+    return SdpBinding(
+        svc_id=svc.svc_id,
+        site_id=site_id,
+        sdp_id=sdp_id,
+        vc_id=_int_field(row, "vcId", "vcIdentifier") or 0,
+        binding_type=btype,
+        admin=_state(row.get("administrativeState")),
+        oper=_state(row.get("operationalState")),
+        mgr_id=svc.mgr_id,
+    )
 
 
 def _port_from_pointer(pointer: str) -> str:
