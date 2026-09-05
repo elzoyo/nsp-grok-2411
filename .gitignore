@@ -12,3 +12,5 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.log
+.grok-session/**/*.lock
+.grok-session/**/*.tmp

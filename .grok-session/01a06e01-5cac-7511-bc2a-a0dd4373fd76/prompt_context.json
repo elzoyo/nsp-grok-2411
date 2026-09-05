@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "prompt_mode": "extend",
+  "audience": "primary",
+  "include_browser_verification": true,
+  "agents_md_files": [],
+  "persona_summaries": [],
+  "build_timestamp_utc": "2026-09-04T19:59:38.346984+00:00",
+  "memory_enabled": false,
+  "os_name": "windows",
+  "shell_path": "powershell",
+  "working_directory": "C:\\Users\\elzoy\\Code\\nsp-grok-2411",
+  "current_date": "2026-09-04",
+  "is_non_interactive": false,
+  "system_prompt_label": "Grok 4.6"
+}

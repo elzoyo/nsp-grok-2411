@@ -1,0 +1,128 @@
+{
+  "params": {
+    "grok_build.SearchReplace": {
+      "skip_read_before_edit": false,
+      "empty_old_string_does_not_override": false,
+      "unicode_normalized_fallback": false,
+      "include_user_edit_hint": true
+    },
+    "grok_build.ReadFile": {
+      "cursor_rules_on_read": false
+    },
+    "grok_build.ListDir": {
+      "max_output_chars": null
+    },
+    "grok_build.Grep": {
+      "max_output_bytes": null,
+      "max_chars_per_line": null
+    },
+    "grok_build.AskUserQuestion": {
+      "timeout_enabled": true,
+      "timeout_secs": 1800,
+      "non_interactive": null
+    },
+    "grok_build.Bash": {
+      "timeout_secs": null,
+      "max_timeout_secs": 36000.0,
+      "output_byte_limit": null,
+      "cmd_prefix": null,
+      "enabled_background": true,
+      "auto_background_on_timeout": true,
+      "foreground_block_budget_ms": null,
+      "max_block_until_ms": null,
+      "allow_background_operator": true,
+      "surface_bg_completion_reminders": true
+    },
+    "grok_build.UseTool": {
+      "native_tool_correction": true
+    },
+    "grok_build.WebFetch": {
+      "cache_ttl_secs": null,
+      "max_cache_entries": null,
+      "timeout_secs": null,
+      "max_content_length": null,
+      "max_markdown_length": null,
+      "context_window_tokens": 500000,
+      "allowed_domains": null,
+      "proxy_endpoint": null,
+      "allow_local": null
+    }
+  },
+  "state": {
+    "grok_build.ReportedTaskCompletions": {
+      "reported": [
+        "01a06e42-a2d3-7e02-aef4-e4cfad172996",
+        "01a06e1a-7852-7b91-89fe-9f4fffaa6908",
+        "01a06e1e-3535-7272-9bc2-8fc442602f1a",
+        "01a06e1d-88d1-7a51-8445-83fe094a3352",
+        "01a06e59-25e9-72f2-9b7b-fa7f52ad8583",
+        "01a0735e-0759-7ca2-b2ad-b85f3c974e8e",
+        "01a06e59-8b34-7823-8dc3-329e3aab0432",
+        "01a06e57-7263-7221-ac20-9710d0736f06",
+        "call-f5cde672-c27b-4938-b18a-7f04a0773198-45",
+        "01a06e41-f146-7022-a426-c8821d341537",
+        "01a06e2d-eb12-79d1-b419-71c64061a4e1",
+        "01a0735f-a3bb-7af0-915f-fe2f36689104",
+        "01a06e57-3d5e-71b0-a82e-05546cde0ce7",
+        "01a06e59-41b4-7bb3-8f82-9a40869faaa6",
+        "01a07382-8820-7292-b0f9-b85c3e679ca1",
+        "01a06e1a-eeb1-7ae1-9afe-5dad944b8cad",
+        "01a06e41-b856-7963-9e7b-6d676db43514",
+        "01a06e64-23f1-7cf0-ab1e-3233d0472bf9",
+        "01a06e59-1aa2-70c1-a157-d5fc9872b78e",
+        "01a06e57-8663-7a83-8bc6-abd85eb821ef",
+        "01a06e58-ba71-7e42-9d32-9294d98db08e",
+        "01a06e59-5ee7-77c1-b12b-373bc9988b03",
+        "01a0735c-aeca-7943-8de8-4a086a84ee22",
+        "01a06e1e-0d63-7441-ba54-923123d59f7a",
+        "01a06e2d-60a0-76d2-a8cc-b16e7b5ef989",
+        "01a06e39-5668-77e0-a45b-287d525dcd0e",
+        "01a06e55-a4b3-7ff2-9725-48a2ad6f8aa5",
+        "01a06e4c-84f5-7e91-b704-1f3ad6c99c7f",
+        "01a06e2d-9d24-7ca3-ac28-36966f346258",
+        "01a06e37-f033-7181-b96f-923f0bc3b2d6",
+        "01a06e55-b387-7ef0-833e-86730273885c",
+        "01a06e57-47bd-7331-a0c8-79103aeac11b",
+        "01a06e38-25d2-75a2-b56b-fac35170046c",
+        "01a06e5a-2476-7a50-a113-c04f12c09345",
+        "01a0735f-98f3-70d0-92fc-677a556fb9c8",
+        "01a06e64-5174-7e72-afc8-4d383fcdedaa",
+        "01a07382-469d-7ad3-ac4d-af2e6ae175f3",
+        "01a06e55-421d-7cf1-b060-69859428715b",
+        "01a06e1d-0ea2-7bc0-b293-ae120f9c4080",
+        "01a06e57-53b0-7460-bdd8-da2b58f47988",
+        "01a06e64-5fe1-7251-bb0c-601a999eada2",
+        "01a06e1d-e2f3-7c81-b570-2b04c3d2b795"
+      ]
+    },
+    "grok_build.Todo": {
+      "todos": {
+        "1": {
+          "content": "Traducir mensajes de app.py, argparse, login, sesión",
+          "priority": "medium",
+          "status": "completed"
+        },
+        "2": {
+          "content": "Traducir SLASH, errores y textos de commands.py",
+          "priority": "medium",
+          "status": "completed"
+        },
+        "3": {
+          "content": "Traducir ayuda, títulos y etiquetas de render.py",
+          "priority": "medium",
+          "status": "completed"
+        },
+        "4": {
+          "content": "Traducir auth.py (login, política de password)",
+          "priority": "medium",
+          "status": "completed"
+        },
+        "5": {
+          "content": "Ajustar tests y commitear",
+          "priority": "medium",
+          "status": "completed"
+        }
+      }
+    }
+  }
+}

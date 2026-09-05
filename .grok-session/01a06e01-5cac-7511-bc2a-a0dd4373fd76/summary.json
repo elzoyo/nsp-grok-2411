@@ -1,0 +1,28 @@
+{
+  "info": {
+    "id": "01a06e01-5cac-7511-bc2a-a0dd4373fd76",
+    "cwd": "C:\\Users\\elzoy\\Code\\nsp-grok-2411"
+  },
+  "session_summary": "Replica web de Nokia NFM-P 24.11 MPLS",
+  "created_at": "2026-09-04T19:59:38.161310900Z",
+  "updated_at": "2026-09-05T21:40:40.713324800Z",
+  "num_messages": 1810,
+  "num_chat_messages": 410,
+  "current_model_id": "grok-4.6",
+  "next_trace_turn": 28,
+  "chat_format_version": 1,
+  "git_root_dir": "C:/Users/elzoy/Code/nsp-grok-2411/",
+  "git_remotes": [
+    "git@github.com:elzoyo/nsp-grok-2411.git"
+  ],
+  "request_id": "50e3c1d1-4f32-43c9-a0bb-6fc2f9c5aa64",
+  "grok_home": "C:\\Users\\elzoy\\.grok",
+  "last_active_at": "2026-09-05T21:40:40.713324800Z",
+  "generated_title": "Replica web de Nokia NFM-P 24.11 MPLS",
+  "agent_name": "grok-build-plan",
+  "sandbox_profile": "off",
+  "reasoning_effort": "high",
+  "last_turn_summary": "No hay sync de sesiones; copia en OneDrive lista",
+  "last_turn_summary_prompt_id": "e9b5ea3d-e40b-4463-b669-4450ce389d30",
+  "last_recap": "Hicimos el CLI NSP-Grok usable (Ctrl-C, id vs serviceId, UI en español), el README de estado y pendientes SAM-O, y lo subimos a `arquitectura-nsp-grok`; el chat sigue en esta PC, no en GitHub."
+}

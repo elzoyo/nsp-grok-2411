@@ -67,6 +67,15 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 
 Lo más natural a continuación, según las queries SAM-O: VPRN en vivo (máscara, estáticas, BGP del VR y RT/NH).
 
+## Retomar la sesión Grok Build
+
+Snapshot en `.grok-session/` (ID `01a06e01-5cac-7511-bc2a-a0dd4373fd76`). En otra PC, tras `git pull`:
+
+```powershell
+.\.grok-session\restore.ps1
+grok --resume 01a06e01-5cac-7511-bc2a-a0dd4373fd76
+```
+
 ## Referencias
 
 `docs/REFERENCES.md` — User Guide, Admin Guide, Statistics, XML API, Service Management, catálogo REST.
