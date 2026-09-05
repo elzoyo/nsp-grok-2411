@@ -35,7 +35,7 @@ admin@172.24.80.28>customers>12> vprn 100
 
 ## Estado actual
 
-Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre solo una parte del árbol.
+Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → sites/SAP/SDP, VPRN (máscara, estáticas, BGP, RT/NH) y túnel/LSP/alarmas/MAC VPLS.
 
 **Hecho**
 
@@ -48,7 +48,7 @@ Rama `arquitectura-nsp-grok`, al día con `origin`. CLI usable; el live cubre so
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
-- Tests: `.\.venv\Scripts\python.exe -m pytest -q`
+- Tests: `.\.venv\Scripts\python.exe -m pytest -q` (Windows) o `.venv/bin/python -m pytest -q` (macOS)
 
 ## Pendientes
 
