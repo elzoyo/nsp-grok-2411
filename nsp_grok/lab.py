@@ -970,6 +970,37 @@ class Store:
             if not (s.svc_id == sap.svc_id and s.site_id == sap.site_id and s.name == sap.name)
         ]
 
+    def add_binding(self, binding: SdpBinding) -> None:
+        self.bindings = [
+            b
+            for b in self.bindings
+            if not (
+                b.svc_id == binding.svc_id
+                and b.site_id == binding.site_id
+                and b.sdp_id == binding.sdp_id
+                and b.vc_id == binding.vc_id
+            )
+        ] + [binding]
+        svc = self.services.get(binding.svc_id)
+        if svc is not None and binding.sdp_id and binding.sdp_id not in svc.sdp_ids:
+            svc.sdp_ids = list(svc.sdp_ids) + [binding.sdp_id]
+
+    def remove_binding(self, binding: SdpBinding) -> None:
+        self.bindings = [
+            b
+            for b in self.bindings
+            if not (
+                b.svc_id == binding.svc_id
+                and b.site_id == binding.site_id
+                and b.sdp_id == binding.sdp_id
+                and b.vc_id == binding.vc_id
+            )
+        ]
+
+    def apply_alarms(self, alarms: list[Alarm]) -> None:
+        if alarms:
+            self.alarms = list(alarms)
+
     def remove_service(self, svc_id: int) -> None:
         self.services.pop(svc_id, None)
         self.sites = [s for s in self.sites if s.svc_id != svc_id]

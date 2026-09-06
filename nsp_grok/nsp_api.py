@@ -359,6 +359,85 @@ def build_sap_admin_xml(fdn: str, svc_type: str, admin: str) -> str:
     )
 
 
+def _sdp_binding_xml_class(binding_type: str) -> str:
+    kind = (binding_type or "spoke").lower()
+    if "mesh" in kind:
+        return "svt.MeshSdpBinding"
+    return "svt.SpokeSdpBinding"
+
+
+def build_sdp_binding_create_xml(
+    site_fdn: str,
+    far_end_ip: str,
+    binding_type: str = "spoke",
+    sdp_id: int | None = None,
+    vc_id: int | None = None,
+) -> str:
+    """configureChildInstance Spoke/Mesh SDP binding under the site FDN."""
+    from xml.sax.saxutils import escape
+
+    cls = _sdp_binding_xml_class(binding_type)
+    circuit = "mesh" if "mesh" in (binding_type or "").lower() else "spoke"
+    extra = ""
+    if sdp_id:
+        extra += f"<sdpId>{int(sdp_id)}</sdpId>"
+    if vc_id:
+        extra += f"<vcId>{int(vc_id)}</vcId>"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(site_fdn)}</distinguishedName>"
+        "<childConfigInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<circuitType>{circuit}</circuitType>"
+        f"<tunnelSelectionTerminationSiteId>{escape(far_end_ip)}</tunnelSelectionTerminationSiteId>"
+        f"{extra}"
+        f"</{cls}>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_sdp_binding_admin_xml(fdn: str, binding_type: str, admin: str) -> str:
+    from xml.sax.saxutils import escape
+
+    cls = _sdp_binding_xml_class(binding_type)
+    state = "down" if admin == "down" else "up"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<administrativeState>{state}</administrativeState>"
+        f"</{cls}>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
+    )
+
+
+def build_alarm_action_xml(fdn: str, action: str) -> str:
+    """fm.FaultManager.acknowledgeFaultUsingDefaults or clearFault. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    method = (
+        "acknowledgeFaultUsingDefaults" if action == "ack" else "clearFault"
+    )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        f'<fm.FaultManager.{method} xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        f"<instanceFullName>{escape(fdn)}</instanceFullName>"
+        f"</fm.FaultManager.{method}>"
+    )
+
+
 def build_service_admin_xml(fdn: str, svc_type: str, admin: str) -> str:
     """configureInstance administrativeState on a service. Explicit write."""
     from xml.sax.saxutils import escape
@@ -1180,6 +1259,110 @@ class NspClient:
                 return str(row.get("objectFullName") or "")
         return ""
 
+    def create_sdp_binding(
+        self,
+        site_fdn: str,
+        far_end_ip: str,
+        binding_type: str = "spoke",
+        sdp_id: int | None = None,
+        vc_id: int | None = None,
+    ) -> None:
+        """Explicit write: configureChildInstance Spoke/Mesh under the site. Never auto."""
+        if not site_fdn:
+            raise NspApiError("sdp create: hace falta FDN del site")
+        if not far_end_ip:
+            raise NspApiError("sdp create: hace falta far-end (tunnelSelectionTerminationSiteId)")
+        self._post_xml(
+            build_sdp_binding_create_xml(site_fdn, far_end_ip, binding_type, sdp_id, vc_id),
+            "sdp create",
+        )
+
+    def configure_sdp_binding_admin(self, fdn: str, binding_type: str, admin: str) -> str:
+        if not fdn:
+            raise NspApiError("hace falta el FDN del SDP binding")
+        self._post_xml(build_sdp_binding_admin_xml(fdn, binding_type, admin), "sdp admin")
+        return fdn
+
+    def delete_sdp_binding(self, fdn: str) -> str:
+        if not fdn:
+            raise NspApiError("hace falta el FDN del SDP binding para borrar")
+        self._post_xml(build_delete_instance_xml(fdn), "sdp delete")
+        return fdn
+
+    def acknowledge_alarm(self, fdn: str) -> str:
+        """fm.FaultManager.acknowledgeFaultUsingDefaults. Explicit write."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del AlarmObject (faultManager:...)")
+        self._post_xml(build_alarm_action_xml(fdn, "ack"), "alarm ack")
+        return fdn
+
+    def clear_alarm(self, fdn: str) -> str:
+        """fm.FaultManager.clearFault. Explicit write."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del AlarmObject (faultManager:...)")
+        self._post_xml(build_alarm_action_xml(fdn, "clear"), "alarm clear")
+        return fdn
+
+    def load_alarms(self, nes: dict[str, NetworkElement]) -> list[Alarm]:
+        """fm.AlarmObject por NE (neId / FDN), nunca dump global."""
+        attrs = [
+            "objectFullName",
+            "displayedName",
+            "severity",
+            "probableCause",
+            "affectedObjectFullName",
+            "isAcknowledged",
+            "additionalText",
+            "neId",
+            "nodeId",
+            "firstTimeDetected",
+            "lastTimeDetected",
+        ]
+        out: list[Alarm] = []
+        seen: set[str] = set()
+        for ne in nes.values():
+            if not ne.system_ip:
+                continue
+            rows = self._optional_find(
+                ["fm.AlarmObject"],
+                attrs,
+                {"equal": {"name": "neId", "value": ne.system_ip}},
+            )
+            if not rows:
+                rows = self._optional_find(
+                    ["fm.AlarmObject"],
+                    attrs,
+                    {
+                        "wildcard": {
+                            "name": "affectedObjectFullName",
+                            "value": f"network:{ne.system_ip}%",
+                        }
+                    },
+                )
+            if not rows:
+                rows = self._optional_find(
+                    ["fm.AlarmObject"],
+                    attrs,
+                    {
+                        "wildcard": {
+                            "name": "objectFullName",
+                            "value": f"faultManager:network@{ne.system_ip}%",
+                        }
+                    },
+                )
+            for row in rows:
+                alarm = _alarm_from_row(row, None, ne_name=ne.name)
+                if alarm is None:
+                    continue
+                key = alarm.object_fdn or alarm.id
+                if key in seen:
+                    continue
+                seen.add(key)
+                if not alarm.ne:
+                    alarm.ne = ne.name
+                out.append(alarm)
+        return out
+
     def load_igp_domains(self) -> list[TopologyAs]:
         """Query 11: topology.AutonomousSystem — cabecera IGP, children empty (sin LSDB)."""
         rows = self._try_find(
@@ -1667,6 +1850,10 @@ def _binding_from_row(row: dict[str, Any], svc: Service) -> SdpBinding | None:
         admin=_state(row.get("administrativeState")),
         oper=_state(row.get("operationalState")),
         mgr_id=svc.mgr_id,
+        far_end=str(
+            row.get("tunnelSelectionTerminationSiteId") or row.get("farEndIpAddress") or ""
+        ),
+        object_fdn=fdn,
     )
 
 
@@ -1814,18 +2001,47 @@ def _parse_time(raw: Any) -> datetime:
         return now
 
 
-def _alarm_from_row(row: dict[str, Any], svc: Service) -> Alarm | None:
-    fdn = str(row.get("objectFullName") or row.get("affectedObjectPointer") or svc.fdn)
+def _alarm_from_row(
+    row: dict[str, Any], svc: Service | None, ne_name: str = ""
+) -> Alarm | None:
+    full = str(row.get("objectFullName") or "")
+    affected = str(
+        row.get("affectedObjectFullName")
+        or row.get("affectedObjectPointer")
+        or (svc.fdn if svc else "")
+        or ""
+    )
+    fdn = full if full.startswith("faultManager:") else (full or affected)
     alarm_id = str(
         row.get("alarmId")
-        or row.get("displayedName")
         or row.get("id")
-        or fdn.rsplit(":", 1)[-1]
         or ""
     )
     if not alarm_id:
+        displayed = str(row.get("displayedName") or "")
+        if "|" in fdn:
+            alarm_id = fdn.rsplit("|", 1)[-1]
+        elif displayed and len(displayed) < 80:
+            alarm_id = displayed
+        else:
+            alarm_id = fdn.rsplit(":", 1)[-1] if fdn else ""
+    if not alarm_id:
         return None
-    ne = str(row.get("siteId") or row.get("ne") or _pointer_tail(row.get("nodePointer")) or "")
+    ne = (
+        ne_name
+        or str(row.get("neId") or row.get("nodeId") or row.get("siteId") or "")
+        or _pointer_tail(row.get("nodePointer"))
+    )
+    acked = str(row.get("isAcknowledged") or row.get("acknowledged") or "").lower() in {
+        "true",
+        "yes",
+        "1",
+    }
+    cleared = str(row.get("cleared") or row.get("isCleared") or "").lower() in {
+        "true",
+        "yes",
+        "1",
+    }
     return Alarm(
         id=alarm_id,
         severity=_severity(row.get("severity") or row.get("perceivedSeverity")),  # type: ignore[arg-type]
@@ -1833,9 +2049,9 @@ def _alarm_from_row(row: dict[str, Any], svc: Service) -> Alarm | None:
         object_fdn=fdn,
         ne=ne,
         raised=_parse_time(row.get("timeRaised") or row.get("lastTimeDetected") or row.get("firstTimeDetected")),
-        additional_text=str(row.get("additionalText") or row.get("description") or ""),
-        acked=str(row.get("acknowledged") or "").lower() in {"true", "yes", "1"},
-        cleared=str(row.get("cleared") or "").lower() in {"true", "yes", "1"},
+        additional_text=str(row.get("additionalText") or row.get("description") or affected),
+        acked=acked,
+        cleared=cleared,
     )
 
 

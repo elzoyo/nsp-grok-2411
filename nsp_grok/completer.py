@@ -29,6 +29,8 @@ VERBS = [
     "create",
     "sap",
     "saps",
+    "sdp",
+    "binding",
     "stats",
     "resync",
     "topology",
@@ -109,6 +111,11 @@ class NspCompleter(Completer):
             for sap in saps:
                 if sap.name.startswith(current):
                     yield Completion(sap.name, start_position=-len(current), display_meta=str(sap.svc_id))
+        elif verb in ("sdp", "binding", "bindings"):
+            if len(parts) == 1 or (len(parts) == 2 and not text.endswith(" ")):
+                for w in ("create", "shutdown", "turnup", "delete", "list"):
+                    if w.startswith(current):
+                        yield Completion(w, start_position=-len(current))
         elif verb in ("ne", "resync"):
             for name in self.ctx.store.visible_nes(self.ctx.user):
                 if name.startswith(current):

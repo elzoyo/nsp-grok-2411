@@ -50,6 +50,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 - Live MPLS: LSPs por `sourceNodeId` del NE (`mpls.DynamicLsp` y hermanas), SDP `svt.Tunnel` e interfaces `mpls.Interface` con wildcard `network:<siteId>:%`. Create/shutdown/delete explícitos (configureChildInstance / configureInstance / deleteInstance); no automáticos.
 - Create de servicios VPRN/VPLS/Epipe (`svc-mgr` + `subscriberPointer`, sites opcionales). Toda escritura destructiva (create/shutdown/delete/alarm clear/query 17) pide confirmación.
 - Create de SAP: `vprn.L3AccessInterface` / `vpls.L2AccessInterface` / `vll.L2AccessInterface` bajo el site, con `portPointer`, VLAN e IP (VPRN). Si el site no existe, lo crea.
+- Create de SDP binding: `svt.SpokeSdpBinding` / `svt.MeshSdpBinding` bajo el site, far-end = system IP del NE destino. Alarm ack/clear live (`fm.FaultManager`).
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -72,7 +73,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto:** create de VPRN/VPLS/Epipe y SAP (`configureChildInstance` en `svc-mgr` / site), y MPLS, con confirmación. Shutdown/delete (servicio, SAP, LSP, alarm clear) y query 17 también piden confirmación. Equipos live al navegar `equipment`.
+**Producto:** create de VPRN/VPLS/Epipe, SAP y SDP binding (`configureChildInstance` en `svc-mgr` / site), y MPLS, con confirmación. Shutdown/delete y alarm clear piden confirmación. Alarm ack/clear live contra `fm.FaultManager`. Equipos live al navegar `equipment`.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 

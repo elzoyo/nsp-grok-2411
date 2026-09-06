@@ -237,6 +237,8 @@ class SdpBinding:
     admin: AdminState = "up"
     oper: OperState = "up"
     mgr_id: int = 0
+    far_end: str = ""
+    object_fdn: str = ""
 
     def __post_init__(self) -> None:
         if not self.mgr_id:
@@ -244,7 +246,9 @@ class SdpBinding:
 
     @property
     def fdn(self) -> str:
-        return f"svc-mgr:service-{self.mgr_id}:{self.site_id}:sdp-{self.sdp_id}"
+        return self.object_fdn or (
+            f"svc-mgr:service-{self.mgr_id}:{self.site_id}:sdp-{self.sdp_id}"
+        )
 
 
 @dataclass

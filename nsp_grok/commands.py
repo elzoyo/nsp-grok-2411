@@ -14,7 +14,7 @@ from rich.text import Text
 from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
-from nsp_grok.models import AccessInterface, Lsp, Service, ServiceSite, Task, User
+from nsp_grok.models import AccessInterface, Lsp, SdpBinding, Service, ServiceSite, Task, User
 from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
@@ -28,6 +28,7 @@ SLASH = {
     "customer": "muestra un cliente",
     "services": "VPRN / VPLS / Epipe  (create|shutdown|delete)",
     "sap": "SAP L3/L2 (create|shutdown|delete)",
+    "sdp": "SDP binding spoke/mesh (create|shutdown|delete)",
     "status": "resumen de sesión",
     "whoami": "usuario, rol, span of control",
     "ne": "elementos de red",
@@ -108,6 +109,9 @@ def _handlers():
         "create": _create_cmd,
         "sap": _sap_cmd,
         "saps": _sap_cmd,
+        "sdp": _sdp_cmd,
+        "binding": _sdp_cmd,
+        "bindings": _sdp_cmd,
         "stats": _stats,
         "resync": _resync,
         "topology": lambda c, a: Outcome(renderable=render.topology_ascii()),
@@ -182,6 +186,8 @@ def _help(ctx: Ctx, args: list[str]) -> Outcome:
     topic = [a.lower() for a in args]
     if topic[:1] in (["sap"], ["saps"]) or topic[:2] == ["create", "sap"]:
         return Outcome(renderable=render.sap_create_help())
+    if topic[:1] in (["sdp"], ["binding"]) or topic[:2] == ["create", "sdp"]:
+        return Outcome(renderable=render.sdp_create_help())
     return Outcome(renderable=render.help_text())
 
 
@@ -201,6 +207,8 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
             return None
         if path[:1] == ["mpls"]:
             return _load_live_mpls(ctx)
+        if path[:1] == ["alarms"]:
+            return _load_live_alarms(ctx)
         if path[:1] != ["customers"]:
             return None
         ctx.store.apply_cpaa(ctx.client.load_cpaa())
@@ -293,6 +301,25 @@ def _load_live_mpls(ctx: Ctx) -> Outcome | None:
     return None
 
 
+def _load_live_alarms(ctx: Ctx) -> Outcome | None:
+    if not ctx.live or ctx.client is None:
+        return None
+    try:
+        ctx.store.apply_nes(ctx.client.load_network_elements())
+        visible = ctx.store.visible_nes(ctx.user)
+        ctx.store.apply_alarms(ctx.client.load_alarms(visible))
+        ctx.rebuild()
+    except UserCancelled:
+        raise
+    except KeyboardInterrupt as exc:
+        raise UserCancelled("Cancelado con Ctrl-C.") from exc
+    except NspApiError as exc:
+        return Outcome(error=str(exc), quit=True)
+    except Exception as exc:
+        return Outcome(error=_unexpected(exc), quit=True)
+    return None
+
+
 def _ne_endpoint(ctx: Ctx, token: str) -> tuple[str, str] | None:
     """(name, system_ip) from visible NE name or IP."""
     visible = ctx.store.visible_nes(ctx.user)
@@ -363,6 +390,8 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
         "help": lambda: _help(ctx, args),
         "sap": lambda: _sap_cmd(ctx, args),
         "saps": lambda: _sap_cmd(ctx, args),
+        "sdp": lambda: _sdp_cmd(ctx, args),
+        "binding": lambda: _sdp_cmd(ctx, args),
         "status": lambda: _status(ctx, args),
         "whoami": lambda: _whoami(ctx, args),
         "ne": lambda: _ne(ctx, args),
@@ -862,8 +891,12 @@ def _create_cmd(ctx: Ctx, args: list[str]) -> Outcome:
     extra = [f"confirm={flag}"] if flag is not None else []
     if rest and rest[0].lower() == "sap":
         return _sap_create(ctx, rest[1:] + extra)
+    if rest and rest[0].lower() in {"sdp", "binding"}:
+        return _sdp_create(ctx, rest[1:] + extra)
     if ctx.cwd and ctx.cwd[-1] == "saps":
         return _sap_create(ctx, args)
+    if ctx.cwd and ctx.cwd[-1] in {"sdp-bindings", "bindings"}:
+        return _sdp_create(ctx, args)
     if ctx.cwd[:1] == ["mpls"]:
         return _lsp_create(ctx, args)
     return _service_create(ctx, args)
@@ -1122,6 +1155,7 @@ def _reload_service_access(ctx: Ctx, svc: Service) -> Outcome | None:
         sites = ctx.client.load_sites(svc)
         saps = ctx.client.load_saps(svc, sites)
         ctx.store.apply_sites_saps(svc.svc_id, sites, saps)
+        ctx.store.apply_bindings(svc.svc_id, ctx.client.load_sdp_bindings(svc))
         ctx.rebuild()
     except UserCancelled:
         raise
@@ -1410,7 +1444,248 @@ def _sap_delete(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(renderable=Text(f"eliminado SAP {sap.name}", style="green"))
 
 
+def _sdp_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    if not args or args[0].lower() in ("list", "ls"):
+        svc = _cwd_service(ctx)
+        bindings = (
+            ctx.store.bindings_of(svc.svc_id, ctx.user)
+            if svc
+            else [
+                b
+                for sid in ctx.store.visible_services(ctx.user)
+                for b in ctx.store.bindings_of(sid, ctx.user)
+            ]
+        )
+        from rich.table import Table
+
+        t = Table(title="SDP bindings", border_style="grey37")
+        t.add_column("servicio")
+        t.add_column("site")
+        t.add_column("sdp")
+        t.add_column("vc")
+        t.add_column("tipo")
+        t.add_column("far-end")
+        t.add_column("oper")
+        for b in bindings:
+            t.add_row(
+                str(b.svc_id),
+                b.site_id,
+                str(b.sdp_id),
+                str(b.vc_id or "—"),
+                b.binding_type,
+                b.far_end or "—",
+                render.state(b.oper),
+            )
+        return Outcome(renderable=t)
+    action = args[0].lower()
+    if action == "create":
+        return _sdp_create(ctx, args[1:])
+    if action in ("shutdown", "shut") and len(args) >= 2:
+        return _sdp_admin(ctx, args[1:], "down")
+    if action in ("turnup", "no-shutdown") and len(args) >= 2:
+        return _sdp_admin(ctx, args[1:], "up")
+    if action == "delete" and len(args) >= 2:
+        return _sdp_delete(ctx, args[1:])
+    binding = _find_binding(ctx, args[0], _cwd_service(ctx))
+    if binding is None:
+        return Outcome(error=f"SDP binding desconocido: {args[0]}")
+    return Outcome(renderable=render.show_binding(binding))
+
+
+def _find_binding(ctx: Ctx, key: str, svc: Service | None = None) -> SdpBinding | None:
+    if svc is not None:
+        bindings = ctx.store.bindings_of(svc.svc_id, ctx.user)
+    else:
+        bindings = [
+            b
+            for sid in ctx.store.visible_services(ctx.user)
+            for b in ctx.store.bindings_of(sid, ctx.user)
+        ]
+    needle = key.lower().replace("sdp-", "")
+    for b in bindings:
+        if b.fdn == key or f"sdp-{b.sdp_id}" == key.lower():
+            return b
+        if str(b.sdp_id) == needle and (svc is not None or True):
+            return b
+        if f"{b.site_id}-sdp-{b.sdp_id}" == key:
+            return b
+    return None
+
+
+def _sdp_create(ctx: Ctx, args: list[str]) -> Outcome:
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
+    if not rest and not kv:
+        return Outcome(renderable=render.sdp_create_help())
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    svc_key = kv.get("service") or kv.get("svc") or kv.get("id") or ""
+    svc = _find_service(ctx, svc_key) if svc_key else _cwd_service(ctx)
+    if svc is None:
+        return Outcome(renderable=render.sdp_create_help())
+    site_tok = kv.get("site") or kv.get("ne") or _cwd_site_token(ctx)
+    far_tok = kv.get("far") or kv.get("farend") or kv.get("to") or kv.get("peer") or ""
+    if not site_tok or not far_tok:
+        return Outcome(
+            error="sdp create: site=<NE|IP> far=<NE|IP> [sdp=<id>] [vc=<id>] [type=spoke|mesh]"
+        )
+    src = _ne_endpoint(ctx, site_tok)
+    dst = _ne_endpoint(ctx, far_tok)
+    if src is None:
+        return Outcome(error=f"NE origen fuera del span: {site_tok}")
+    if dst is None:
+        return Outcome(error=f"NE destino (far-end) fuera del span: {far_tok}")
+    src_name, site_ip = src
+    dst_name, far_ip = dst
+    if not site_ip or not far_ip:
+        return Outcome(error="site y far-end necesitan system IP (siteId)")
+    btype = (kv.get("type") or kv.get("binding") or "").lower()
+    if not btype:
+        btype = "mesh" if svc.svc_type == "vpls" else "spoke"
+    if btype not in {"spoke", "mesh"}:
+        return Outcome(error="sdp create: type=spoke|mesh")
+    sdp_raw = kv.get("sdp") or kv.get("sdpid") or kv.get("tunnel") or ""
+    sdp_id = int(sdp_raw) if sdp_raw.isdigit() else 0
+    vc_raw = kv.get("vc") or kv.get("vcid") or ""
+    vc_id = int(vc_raw) if vc_raw.isdigit() else svc.svc_id
+    existing = ctx.store.sites_of(svc.svc_id, ctx.user)
+    site = next((s for s in existing if s.site_id == site_ip or s.ne == src_name), None)
+    new_site = site is None
+    site_note = " (crea el site)" if new_site else ""
+    denied = _require_confirm(
+        ctx,
+        (
+            f"Crear SDP {btype} {svc.svc_type.upper()} {svc.svc_id} "
+            f"site={src_name} ({site_ip}) far={dst_name} ({far_ip}) "
+            f"sdp={sdp_id or 'auto'} vc={vc_id}{site_note} en {_backend_label(ctx)}"
+        ),
+        flag,
+    )
+    if denied is not None:
+        return denied
+    site_fdn = f"{svc.fdn}:{site_ip}"
+    if ctx.live and ctx.client is not None:
+        if new_site:
+            ctx.client.create_site(svc.fdn, svc.svc_type, site_ip)
+        ctx.client.create_sdp_binding(
+            site_fdn, far_ip, btype, sdp_id or None, vc_id
+        )
+        err = _reload_service_access(ctx, svc)
+        if err is not None:
+            return err
+        created = _find_binding(ctx, str(sdp_id or vc_id), svc)
+        if created is None:
+            created = SdpBinding(
+                svc_id=svc.svc_id,
+                site_id=site_ip,
+                sdp_id=sdp_id,
+                vc_id=vc_id,
+                binding_type=btype,
+                mgr_id=svc.mgr_id,
+                far_end=far_ip,
+            )
+            if new_site:
+                ctx.store.add_site(
+                    ServiceSite(svc_id=svc.svc_id, site_id=site_ip, ne=src_name, mgr_id=svc.mgr_id)
+                )
+            ctx.store.add_binding(created)
+            ctx.rebuild()
+        _task(ctx, f"create SDP {btype} {created.sdp_id}", created.fdn)
+        return Outcome(
+            renderable=Group(
+                Text("creado en NSP (configureChildInstance, no automático)", style="green"),
+                render.show_binding(created),
+            )
+        )
+    if new_site:
+        ctx.store.add_site(
+            ServiceSite(svc_id=svc.svc_id, site_id=site_ip, ne=src_name, mgr_id=svc.mgr_id)
+        )
+    created = SdpBinding(
+        svc_id=svc.svc_id,
+        site_id=site_ip,
+        sdp_id=sdp_id,
+        vc_id=vc_id,
+        binding_type=btype,
+        mgr_id=svc.mgr_id,
+        far_end=far_ip,
+    )
+    ctx.store.add_binding(created)
+    ctx.rebuild()
+    _task(ctx, f"create SDP {btype} {sdp_id or vc_id}", created.fdn)
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_binding(created)))
+
+
+def _sdp_admin(ctx: Ctx, args: list[str], admin: str) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: sdp shutdown|turnup <sdp-id> [confirm=yes]")
+    binding = _find_binding(ctx, rest[0], _cwd_service(ctx))
+    if binding is None:
+        return Outcome(error=f"SDP binding desconocido: {rest[0]}")
+    if admin == "down":
+        denied = _require_confirm(
+            ctx,
+            f"Apagar (shutdown) SDP {binding.sdp_id} servicio {binding.svc_id} en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.configure_sdp_binding_admin(binding.fdn, binding.binding_type, admin)
+        svc = ctx.store.services.get(binding.svc_id)
+        if svc is not None:
+            err = _reload_service_access(ctx, svc)
+            if err is not None:
+                return err
+            binding = _find_binding(ctx, str(binding.sdp_id), svc) or binding
+    binding.admin = admin  # type: ignore[assignment]
+    binding.oper = admin  # type: ignore[assignment]
+    verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
+    _task(ctx, f"{verb} SDP {binding.sdp_id}", binding.fdn)
+    return Outcome(renderable=Text(f"sdp-{binding.sdp_id} {verb}", style="green"))
+
+
+def _sdp_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: sdp delete <sdp-id> [confirm=yes]")
+    binding = _find_binding(ctx, rest[0], _cwd_service(ctx))
+    if binding is None:
+        return Outcome(error=f"SDP binding desconocido: {rest[0]}")
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar SDP {binding.sdp_id} ({binding.binding_type}) servicio {binding.svc_id} "
+        f"FDN {binding.fdn} en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    svc = ctx.store.services.get(binding.svc_id)
+    if ctx.live and ctx.client is not None:
+        ctx.client.delete_sdp_binding(binding.fdn)
+        if svc is not None:
+            err = _reload_service_access(ctx, svc)
+            if err is not None:
+                return err
+        if _find_binding(ctx, str(binding.sdp_id), svc):
+            ctx.store.remove_binding(binding)
+            ctx.rebuild()
+    else:
+        ctx.store.remove_binding(binding)
+        ctx.rebuild()
+    _task(ctx, f"delete SDP {binding.sdp_id}", binding.fdn)
+    return Outcome(renderable=Text(f"eliminado SDP {binding.sdp_id}", style="green"))
+
+
 def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
+    err = _load_live_alarms(ctx)
+    if err is not None:
+        return err
     visible = ctx.store.visible_nes(ctx.user)
     alarms = [a for a in ctx.store.alarms if a.ne in visible or not a.ne]
     if not args:
@@ -1448,6 +1723,13 @@ def _alarm_mutate(
     if alarm is None:
         return Outcome(error=f"alarma desconocida: {alarm_id}")
     if ack:
+        if ctx.live and ctx.client is not None:
+            if not alarm.object_fdn.startswith("faultManager"):
+                return Outcome(
+                    error=f"la alarma {alarm_id} no tiene FDN live (faultManager:...)"
+                )
+            ctx.client.acknowledge_alarm(alarm.object_fdn)
+            _load_live_alarms(ctx)
         alarm.acked = True
         alarm.acked_by = ctx.user.username
         _task(ctx, f"acknowledge {alarm_id}", alarm.object_fdn)
@@ -1460,6 +1742,13 @@ def _alarm_mutate(
         )
         if denied is not None:
             return denied
+        if ctx.live and ctx.client is not None:
+            if not alarm.object_fdn.startswith("faultManager"):
+                return Outcome(
+                    error=f"la alarma {alarm_id} no tiene FDN live (faultManager:...)"
+                )
+            ctx.client.clear_alarm(alarm.object_fdn)
+            _load_live_alarms(ctx)
         alarm.cleared = True
         alarm.severity = "cleared"
         _task(ctx, f"clear {alarm_id}", alarm.object_fdn)

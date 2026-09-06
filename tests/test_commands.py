@@ -536,6 +536,9 @@ class _LiveSapClient:
     def load_saps(self, svc, sites=None):
         return []
 
+    def load_sdp_bindings(self, svc):
+        return []
+
     def create_site(self, svc_fdn, svc_type, site_ip):
         self.sites.append((svc_fdn, svc_type, site_ip))
         return f"{svc_fdn}:{site_ip}"
@@ -562,3 +565,158 @@ def test_live_sap_create_posts_to_nsp():
     assert client.saps[0][1].endswith(":10.10.1.1")
     assert "port-4" in client.saps[0][2]
     assert client.saps[0][3] == 301
+
+
+def test_sdp_create_requires_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "sdp create service=100 site=PE-BAIRES-01 far=PE-CORDOBA-01 sdp=109 vc=100 type=spoke",
+    )
+    assert "confirmación" in out.error
+
+
+def test_sdp_create_lab():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "sdp create service=100 site=PE-BAIRES-01 far=PE-CORDOBA-01 sdp=109 vc=100 type=spoke confirm=yes",
+    )
+    assert out.error == ""
+    b = next(x for x in ctx.store.bindings if x.sdp_id == 109 and x.svc_id == 100)
+    assert b.binding_type == "spoke"
+    assert b.site_id == "10.10.1.1"
+    assert b.far_end == "10.10.2.1"
+    assert b.vc_id == 100
+
+
+def test_sdp_create_vpls_defaults_mesh():
+    ctx = _admin_ctx()
+    dispatch(ctx, "customers 20 vpls 200")
+    out = dispatch(
+        ctx,
+        "sdp create site=PE-BAIRES-01 far=PE-BAIRES-02 sdp=208 confirm=yes",
+    )
+    assert out.error == ""
+    b = next(x for x in ctx.store.bindings if x.sdp_id == 208)
+    assert b.binding_type == "mesh"
+
+
+def test_sdp_shutdown_and_delete():
+    ctx = _admin_ctx()
+    dispatch(
+        ctx,
+        "sdp create service=300 site=PE-BAIRES-01 far=PE-ROSARIO-01 sdp=219 vc=300 type=spoke confirm=yes",
+    )
+    out = dispatch(ctx, "sdp shutdown 219")
+    assert "confirmación" in out.error
+    out = dispatch(ctx, "sdp shutdown 219 confirm=yes")
+    assert out.error == ""
+    b = next(x for x in ctx.store.bindings if x.sdp_id == 219)
+    assert b.admin == "down"
+    out = dispatch(ctx, "sdp delete 219 confirm=yes")
+    assert out.error == ""
+    assert not any(x.sdp_id == 219 for x in ctx.store.bindings)
+
+
+def test_help_sdp_shows_hierarchy():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "help sdp")
+    assert out.error == ""
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=120, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "SpokeSdpBinding" in text
+    assert "tunnelSelectionTerminationSiteId" in text
+    out = dispatch(ctx, "sdp create")
+    buf = StringIO()
+    Console(file=buf, width=120, color_system=None).print(out.renderable)
+    assert "far-end" in buf.getvalue().lower() or "far-end" in buf.getvalue()
+
+
+class _LiveSdpClient:
+    def __init__(self) -> None:
+        self.created: list[tuple] = []
+        self.sites: list[tuple] = []
+
+    def load_sites(self, svc):
+        return []
+
+    def load_saps(self, svc, sites=None):
+        return []
+
+    def load_sdp_bindings(self, svc):
+        return []
+
+    def create_site(self, svc_fdn, svc_type, site_ip):
+        self.sites.append((svc_fdn, svc_type, site_ip))
+        return f"{svc_fdn}:{site_ip}"
+
+    def create_sdp_binding(self, site_fdn, far_end_ip, binding_type="spoke", sdp_id=None, vc_id=None):
+        self.created.append((site_fdn, far_end_ip, binding_type, sdp_id, vc_id))
+
+
+def test_live_sdp_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveSdpClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "sdp create service=300 site=PE-BAIRES-01 far=PE-ROSARIO-01 sdp=201 vc=300 type=spoke confirm=yes",
+    )
+    assert out.error == ""
+    assert client.created
+    assert client.created[0][1] == "10.10.3.1"
+    assert client.created[0][2] == "spoke"
+    assert client.created[0][3] == 201
+
+
+class _LiveAlarmClient:
+    def __init__(self) -> None:
+        self.acked: list[str] = []
+        self.cleared: list[str] = []
+
+    def load_network_elements(self):
+        return {}
+
+    def load_alarms(self, nes):
+        return []
+
+    def acknowledge_alarm(self, fdn):
+        self.acked.append(fdn)
+        return fdn
+
+    def clear_alarm(self, fdn):
+        self.cleared.append(fdn)
+        return fdn
+
+
+def test_live_alarm_ack_and_clear():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveAlarmClient()
+    ctx.client = client
+    alarm = next(a for a in ctx.store.alarms if a.id == "A-1001")
+    alarm.object_fdn = "faultManager:network@10.10.1.1|alarm-10"
+    out = dispatch(ctx, "alarm ack A-1001")
+    assert out.error == ""
+    assert client.acked == ["faultManager:network@10.10.1.1|alarm-10"]
+    alarm = next(a for a in ctx.store.alarms if a.id == "A-1001")
+    alarm.object_fdn = "faultManager:network@10.10.1.1|alarm-10"
+    out = dispatch(ctx, "alarm clear A-1001 confirm=yes")
+    assert out.error == ""
+    assert client.cleared == ["faultManager:network@10.10.1.1|alarm-10"]
+
+
+def test_live_alarm_ack_needs_fdn():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveAlarmClient()
+    ctx.client = client
+    out = dispatch(ctx, "alarm ack A-1001")
+    assert "FDN" in out.error
+    assert client.acked == []

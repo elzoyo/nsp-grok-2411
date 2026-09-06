@@ -490,6 +490,7 @@ def show_binding(b: SdpBinding) -> RenderableType:
             ("VC ID", b.vc_id),
             ("Tipo", b.binding_type),
             ("Site", b.site_id),
+            ("Far-end", b.far_end or "—"),
             ("Estado administrativo", state(b.admin)),
             ("Estado operacional", state(b.oper)),
         ],
@@ -792,6 +793,85 @@ def sap_create_help() -> RenderableType:
     )
 
 
+def sdp_create_help() -> RenderableType:
+    """Jerarquía NFM-P y comportamiento al crear un SDP binding."""
+    schema = Text.from_markup(
+        """\
+[bold cyan]netw.NetworkElement[/]              site origen (system IP)
+        │
+        └── [bold cyan]vprn.Site / vpls.Site / epipe.Site[/]
+                FDN  [bold]svc-mgr:service-<id>:<siteId>[/]
+                    │
+                    └── [bold cyan]svt.SpokeSdpBinding / svt.MeshSdpBinding[/]
+                            tunnelSelectionTerminationSiteId
+                            = system IP del [bold]NE far-end[/]
+                            sdpId / vcId opcionales
+                            el túnel (svt.Tunnel) ya debe existir
+                            entre esos dos NEs
+"""
+    )
+    steps = Table(title="Comportamiento NFM-P al crear el SDP binding", border_style="grey37")
+    steps.add_column("#", style="bold cyan", justify="right")
+    steps.add_column("qué hace")
+    for n, desc in [
+        (
+            "1",
+            "El SDP binding asocia un túnel de servicio (SDP) a un servicio distribuido. "
+            "Solo hace falta si el servicio cruza más de un NE.",
+        ),
+        (
+            "2",
+            "Cuelga del site de origen, igual que el SAP. "
+            "distinguishedName = svc-mgr:service-<id>:<siteId>.",
+        ),
+        (
+            "3",
+            "tunnelSelectionTerminationSiteId es el system IP del NE destino (far-end), "
+            "no un nombre libre.",
+        ),
+        (
+            "4",
+            "VPRN y Epipe usan spoke (svt.SpokeSdpBinding). "
+            "VPLS admite mesh (svt.MeshSdpBinding) o spoke; el default en VPLS es mesh.",
+        ),
+        (
+            "5",
+            "sdp=<id> apunta a un svt.Tunnel existente. vc= default = serviceId del NE. "
+            "Si el site de origen no existe, se crea.",
+        ),
+    ]:
+        steps.add_row(n, desc)
+
+    uso = Table(title="Uso", border_style="grey37")
+    uso.add_column("comando", style="bold cyan")
+    uso.add_column("detalle")
+    for cmd, desc in [
+        (
+            "sdp create service=<id> site=<NE> far=<NE> [sdp=<id>] [vc=<id>] [type=spoke|mesh]",
+            "pide confirmación",
+        ),
+        (
+            "create sdp site=NE far=NE sdp=101",
+            "desde el contexto del servicio",
+        ),
+        ("sdp shutdown|delete <sdp-id>", "piden confirmación"),
+        ("sdp turnup <sdp-id>", "no pide confirmación"),
+        ("confirm=yes", "batch / script; en el REPL pregunta [sí/no]"),
+    ]:
+        uso.add_row(cmd, desc)
+
+    nota = Text.from_markup(
+        "[dim]Resumen: binding = servicio × site origen × NE far-end. "
+        "El SAP es el acceso del cliente; el SDP binding es el transporte entre NEs.[/]"
+    )
+    return Group(
+        Panel(schema, title="Create SDP binding — jerarquía NFM-P", border_style="cyan"),
+        steps,
+        uso,
+        nota,
+    )
+
+
 def help_text() -> RenderableType:
     flow = Table(title="Shell  user@NSP  ·  anidado como Fire / SR OS", border_style="grey37")
     flow.add_column("escribís", style="bold cyan")
@@ -835,11 +915,13 @@ def help_text() -> RenderableType:
         ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS (live por NE)"),
         ("/service create type=vprn|vpls|epipe id=N customer=C name=X", "crea servicio (pide confirmación)"),
         ("/sap create service=N site=NE port=P vlan=V [ip=a.b.c.d/p]", "crea SAP (pide confirmación)"),
+        ("/sdp create service=N site=NE far=NE [sdp=id] [type=spoke|mesh]", "crea SDP binding (pide confirmación)"),
         ("/service shutdown|turnup|delete <id>", "admin servicio (shutdown/delete piden confirmación)"),
         ("/sap shutdown|turnup|delete <nombre>", "admin SAP (shutdown/delete piden confirmación)"),
+        ("/sdp shutdown|turnup|delete <sdp-id>", "admin SDP binding (shutdown/delete piden confirmación)"),
+        ("/alarms [list|ack|clear|sev]", "fallas (live: fm.AlarmObject por NE)"),
         ("/mpls lsp create name=X from=NE to=NE", "crea LSP (pide confirmación)"),
         ("/mpls lsp shutdown|turnup|delete <n>", "admin LSP (shutdown/delete piden confirmación)"),
-        ("/alarms [list|ack|clear|sev]", "fallas"),
         ("/stats <fdn>", "stats live: find log record + timeCaptured (15 min)"),
         ("/topology", "topología ASCII del lab"),
         ("/tasks", "gestor de tareas de esta sesión"),
@@ -863,7 +945,7 @@ def help_text() -> RenderableType:
     for cmd, desc in [
         ("sites", "vprn.Site / vpls.Site / epipe.Site  FDN svc-mgr:service-<id>:<ip>"),
         ("saps", "L3AccessInterface o L2AccessInterface (SAP)"),
-        ("sdp-bindings", "SDP binding spoke/mesh"),
+        ("sdp-bindings", "svt.SpokeSdpBinding / svt.MeshSdpBinding (hijo del site)"),
         ("tunnels", "svt.Tunnel (SDP)"),
         ("lsps", "mpls.DynamicLsp de esos SDP"),
         ("alarms", "fm.AlarmObject del servicio"),
@@ -888,7 +970,7 @@ def help_text() -> RenderableType:
     ]:
         ids.add_row(cmd, desc)
 
-    return Group(flow, nav, slash, related, ids, sap_create_help())
+    return Group(flow, nav, slash, related, ids, sap_create_help(), sdp_create_help())
 
 
 def _object_state(payload: Any) -> str:

@@ -14,6 +14,9 @@ from nsp_grok.nsp_api import (
     build_sap_admin_xml,
     build_sap_create_xml,
     build_site_create_xml,
+    build_sdp_binding_admin_xml,
+    build_sdp_binding_create_xml,
+    build_alarm_action_xml,
     build_delete_instance_xml,
     raise_if_xml_fault,
     _alarm_from_row,
@@ -902,3 +905,32 @@ def test_sap_create_xml_epipe_and_escape():
     down = build_sap_admin_xml("svc-mgr:service-1:10.10.1.1:ip-if-4", "vprn", "down")
     assert "<vprn.L3AccessInterface>" in down
     assert "<administrativeState>down</administrativeState>" in down
+
+
+def test_sdp_binding_create_xml_spoke():
+    xml = build_sdp_binding_create_xml(
+        "svc-mgr:service-1:10.10.1.1",
+        "10.10.2.1",
+        "spoke",
+        sdp_id=101,
+        vc_id=100,
+    )
+    assert "generic.GenericObject.configureChildInstance" in xml
+    assert "<svt.SpokeSdpBinding>" in xml
+    assert "<circuitType>spoke</circuitType>" in xml
+    assert "<tunnelSelectionTerminationSiteId>10.10.2.1</tunnelSelectionTerminationSiteId>" in xml
+    assert "<sdpId>101</sdpId>" in xml
+    assert "<vcId>100</vcId>" in xml
+    mesh = build_sdp_binding_create_xml("svc-mgr:service-2:10.10.1.1", "10.10.1.2", "mesh")
+    assert "<svt.MeshSdpBinding>" in mesh
+    down = build_sdp_binding_admin_xml("svc-mgr:service-1:10.10.1.1:circuit-1-100", "spoke", "down")
+    assert "<administrativeState>down</administrativeState>" in down
+
+
+def test_alarm_action_xml():
+    ack = build_alarm_action_xml("faultManager:network@10.10.1.1|alarm-1", "ack")
+    assert "fm.FaultManager.acknowledgeFaultUsingDefaults" in ack
+    assert "<instanceFullName>faultManager:network@10.10.1.1|alarm-1</instanceFullName>" in ack
+    clear = build_alarm_action_xml("faultManager:x&y", "clear")
+    assert "fm.FaultManager.clearFault" in clear
+    assert "&amp;" in clear
