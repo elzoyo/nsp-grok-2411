@@ -21,7 +21,31 @@ _SWITCH_HINT = re.compile(
     r"WS-C|C9200|C9300|C2960|C3750|C3850|C3560|Nexus|switch",
     re.I,
 )
+_ROUTER_HINT = re.compile(
+    r"ISR|ASR|CSR1|C8000|7200|7300|7600|ASR9|router|NCS|IOS-XE",
+    re.I,
+)
 _FO_HINT = re.compile(r"\b(FO|fibra|SFP|uplink|WAN|sitio|nodo)\b", re.I)
+
+
+def ope_prefix(ip: str) -> str:
+    parts = (ip or "").split(".")
+    if len(parts) == 4 and all(p.isdigit() for p in parts):
+        return ".".join(parts[:3]) + "."
+    return ""
+
+
+def same_ope(ip: str, ce_ope: str) -> bool:
+    pref = ope_prefix(ce_ope)
+    return bool(pref and (ip or "").startswith(pref))
+
+
+def is_switch_plat(plataforma: str) -> bool:
+    return bool(_SWITCH_HINT.search(plataforma or ""))
+
+
+def is_router_plat(plataforma: str) -> bool:
+    return bool(_ROUTER_HINT.search(plataforma or "")) and not is_switch_plat(plataforma)
 
 
 def _sitio_from_text(*parts: str) -> str:
@@ -42,19 +66,27 @@ def _sitio_from_text(*parts: str) -> str:
     return ""
 
 
-def _is_local_l2(vec: VecinoL2, nodo_host: str, ope_prefix: str) -> bool:
-    if _SWITCH_HINT.search(vec.plataforma or ""):
+def site_tokens(name: str) -> set[str]:
+    return set(re.findall(r"[A-Z]{4,}", (name or "").upper()))
+
+
+def same_site(name: str, nodo_host: str) -> bool:
+    a, b = site_tokens(name), site_tokens(nodo_host)
+    return bool(a and b and (a & b))
+
+
+def is_local_neighbor(hostname: str, plataforma: str, ip: str, nodo_host: str, ce_ope: str) -> bool:
+    if is_switch_plat(plataforma) and (same_site(hostname, nodo_host) or same_ope(ip, ce_ope) or not hostname):
         return True
-    host = (vec.hostname or "").upper()
-    if host and nodo_host:
-        # mismo predio si comparte el token de sitio del CE (PAYSANDU, etc.)
-        ce_toks = set(re.findall(r"[A-Z]{4,}", nodo_host.upper()))
-        nb_toks = set(re.findall(r"[A-Z]{4,}", host))
-        if ce_toks & nb_toks:
-            return True
-    if ope_prefix and vec.ip_mgmt.startswith(ope_prefix):
+    if same_site(hostname, nodo_host):
+        return True
+    if same_ope(ip, ce_ope):
         return True
     return False
+
+
+def _is_local_l2(vec: VecinoL2, nodo_host: str, ce_ope: str) -> bool:
+    return is_local_neighbor(vec.hostname, vec.plataforma, vec.ip_mgmt, nodo_host, ce_ope)
 
 
 def _iface_by_logical(ifs: list[Interfaz]) -> dict[str, Interfaz]:
@@ -108,11 +140,10 @@ def correlate_ospf(
 def classify_and_rack(inv: Inventario) -> Inventario:
     nodo = inv.nodo.hostname
     ope_ip = inv.nodo.ip_ope
-    ope_prefix = ".".join(ope_ip.split(".")[:3]) + "." if ope_ip else ""
 
     local_hosts: set[str] = {nodo}
     for vec in inv.vecino_l2:
-        if _is_local_l2(vec, nodo, ope_prefix):
+        if _is_local_l2(vec, nodo, ope_ip):
             local_hosts.add(vec.hostname)
 
     conex: list[Conexion] = []
@@ -125,7 +156,7 @@ def classify_and_rack(inv: Inventario) -> Inventario:
             continue
         seen_l2.add(key)
         vrf = _vrf_of_local_if(inv.interfaz, vec.if_local)
-        if vec.hostname in local_hosts and _is_local_l2(vec, nodo, ope_prefix):
+        if vec.hostname in local_hosts and _is_local_l2(vec, nodo, ope_ip):
             conex.append(
                 Conexion(
                     id=f"loc-{vec.if_local}-{vec.hostname}",
@@ -237,17 +268,22 @@ def classify_and_rack(inv: Inventario) -> Inventario:
         if vec.hostname not in local_hosts or vec.hostname in seen_eq:
             continue
         seen_eq.add(vec.hostname)
+        rol = "L2"
+        if is_router_plat(vec.plataforma) or (
+            vec.proto == "salto" and not is_switch_plat(vec.plataforma)
+        ):
+            rol = "CE"
         equipos.append(
             EquipoRack(
                 hostname=vec.hostname,
-                rol="L2",
+                rol=rol,
                 plataforma=vec.plataforma,
                 ru_inicio=ru_l2,
-                ru_alto=1,
+                ru_alto=2 if rol == "CE" else 1,
                 faceplate=[vec.if_remota] if vec.if_remota else [],
             )
         )
-        ru_l2 -= 1
+        ru_l2 -= 2 if rol == "CE" else 1
     inv.equipo_rack = equipos
     inv.rack = Rack(origen_posicion="inferida")
     inv.huecos = _huecos(inv, ospf_ifs)

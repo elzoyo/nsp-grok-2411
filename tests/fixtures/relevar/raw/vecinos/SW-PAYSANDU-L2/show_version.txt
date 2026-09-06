@@ -1,0 +1,4 @@
+! command: show version
+Cisco IOS Software, C2960 Software (C2960-LANBASEK9-M), Version 15.0(2)SE11
+SW-PAYSANDU-L2 uptime is 40 weeks, 1 day, 2 hours
+cisco WS-C2960-24TT-L (PowerPC405) processor

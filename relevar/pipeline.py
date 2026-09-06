@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from collections.abc import Callable
+
 from relevar.collect import raw_get, read_raw_map
 from relevar.correlate import classify_and_rack, correlate_ospf, ospf_correlacion_ok
 from relevar.emit_drawio import write_drawio
@@ -176,8 +178,19 @@ def from_raw_dir(
     ip_ope: str,
     dest: Path,
     vrf_filter: list[str] | None = None,
+    saltar: str | None = None,
+    confirm: Callable[[str], bool] | None = None,
 ) -> Inventario:
+    from relevar.salto import ejecutar_saltos
+
     raw = read_raw_map(raw_dir)
     inv = build_inventario(raw, ip_ope, vrf_filter)
+    inv = ejecutar_saltos(
+        inv,
+        raw_dir,
+        flag=saltar,
+        confirm=confirm,
+        live=False,
+    )
     emit_all(inv, dest)
     return inv

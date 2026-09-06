@@ -352,9 +352,21 @@ Un hop. Un CE Cisco. N hojas draw.io (tapa + Rack + una por VRF). CLI `relevar u
 Parsers: `show vrf`, `show ip vrf interfaces`, `show interfaces description`, `show cdp neighbors detail`, `show ip ospf neighbor`, `show ip ospf interface`.
 Vista frontal de rack generada con posición U inferida, L2 locales por CDP y salidas a otros sitios como patchera(s) FO-FC.
 
-### Fuera de MVP (no implementar en el primer build)
+### Salto a vecinos (acotado, con consulta)
 
-- Saltar por OPE a intermediarias CDP y repetir un subset.
+No es crawl. Un hop extra, por OPE, **solo** si el operador acepta. Antes de conectar se informa equipo, IP y objetivo.
+
+| Caso | Objetivo | Comandos |
+|------|----------|----------|
+| L2 local (CDP/LLDP, misma OPE o mismo sitio) | rack y VLANs del predio | version, VLAN, CDP, descripciones |
+| Segundo L3 del predio (CDP router local / OPE) | VRFs y tendido local | version, VRF, CDP, HSRP |
+| OSPF sin CDP cuya IP es OPE y **no** nombra otro sitio | clasificar local vs FO | version + hostname + inventory |
+
+No se salta a intermediarias de otro predio. No se salta en cadena desde el vecino.
+
+`--saltar=yes` acepta todos; `--saltar=no` no salta; sin flag, en live pregunta cada uno.
+
+### Fuera de MVP (no implementar en el primer build)
 - Multi-rack / overlay `rack.yaml` con U y puertos ODF reales relevados en sitio.
 - Driver Nokia 7705 / SR.
 - Cruce con NFM-P (`vprn.Vprn` / site) “ya tiene VPRN vs pendiente”.

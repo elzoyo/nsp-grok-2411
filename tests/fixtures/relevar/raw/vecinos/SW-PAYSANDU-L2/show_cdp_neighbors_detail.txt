@@ -1,0 +1,13 @@
+! command: show cdp neighbors detail
+-------------------------
+Device ID: NOD-PAYSANDU-CE
+Entry address(es):
+  IP address: 10.0.6.250
+Platform: cisco ISR4331/K9,  Capabilities: Router Switch
+Interface: GigabitEthernet0/1,  Port ID (outgoing port): GigabitEthernet1/0/48
+-------------------------
+Device ID: AP-PAYSANDU-01
+Entry address(es):
+  IP address: 10.0.6.40
+Platform: cisco AIR-AP,  Capabilities: Trans-Bridge
+Interface: GigabitEthernet0/2,  Port ID (outgoing port): GigabitEthernet0

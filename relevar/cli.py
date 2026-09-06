@@ -10,6 +10,7 @@ from pathlib import Path
 from relevar.collect import collect_live, read_raw_map
 from relevar.errors import RelevarError
 from relevar.pipeline import build_inventario, emit_all, node_dir
+from relevar.salto import ejecutar_saltos
 from relevar.ssh import credentials
 
 
@@ -25,7 +26,8 @@ def parse_target(spec: str) -> tuple[str, str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="relevar",
-        description="Inventario pre-migración de un CE Cisco (un hop, por OPE).",
+        description="Inventario pre-migración de un CE Cisco (por OPE). "
+        "Antes de saltar a un vecino pregunta equipo, IP y objetivo.",
     )
     p.add_argument("target", nargs="?", help="user@ip  (IP de gestión en OPE)")
     p.add_argument("--vrf", default="", help="filtro de VRF, separadas por coma (OPE,CORP,TRA)")
@@ -36,6 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="regenerar desde un directorio raw/ ya colectado (sin SSH)",
     )
     p.add_argument("--ip", default="", help="IP OPE a grabar en el inventario (default: host del target)")
+    p.add_argument(
+        "--saltar",
+        default="",
+        metavar="yes|no",
+        help="yes = aceptar todos los saltos; no = no saltar; vacío = preguntar (live) o replay raw/vecinos",
+    )
     return p
 
 
@@ -75,6 +83,7 @@ def _run(args: argparse.Namespace) -> int:
             ip = "0.0.0.0"
         raw = read_raw_map(raw_dir)
         inv = build_inventario(raw, ip, vrfs)
+        inv = ejecutar_saltos(inv, raw_dir, flag=_saltar_flag(args.saltar), live=False)
         dest.mkdir(parents=True, exist_ok=True)
         emit_all(inv, dest)
         _ok(inv, dest)
@@ -97,6 +106,14 @@ def _run(args: argparse.Namespace) -> int:
     for src in raw_dir.glob("*.txt"):
         target = dest / "raw" / src.name
         target.write_bytes(src.read_bytes())
+    inv = ejecutar_saltos(
+        inv,
+        dest / "raw",
+        user=user,
+        password=password,
+        flag=_saltar_flag(args.saltar),
+        live=True,
+    )
     emit_all(inv, dest)
     # cleanup staging
     for src in raw_dir.glob("*.txt"):
@@ -110,11 +127,25 @@ def _run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _saltar_flag(raw: str) -> str | None:
+    text = (raw or "").strip().lower()
+    if not text:
+        return None
+    if text in {"yes", "y", "si", "sí", "s"}:
+        return "yes"
+    if text in {"no", "n"}:
+        return "no"
+    raise RelevarError("--saltar=yes|no", code=1)
+
+
 def _ok(inv, dest: Path) -> None:
     print(f"nodo {inv.nodo.hostname} ({inv.nodo.ip_ope})")
     print(f"  VRFs: {', '.join(v.nombre for v in inv.vrf) or '—'}")
     print(f"  OSPF vecinos: {len(inv.ospf_neighbor)}")
     print(f"  conexiones: {len(inv.conexion)}  huecos: {len(inv.huecos)}")
+    if inv.salto:
+        bits = ", ".join(f"{s.hostname or s.ip}:{s.estado}" for s in inv.salto)
+        print(f"  saltos: {bits}")
     print(f"  {dest / 'inventario.json'}")
     print(f"  {dest / 'relevamiento.md'}")
     print(f"  {dest / 'nodo.drawio'}")

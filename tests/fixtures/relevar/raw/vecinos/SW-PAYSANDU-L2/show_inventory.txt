@@ -1,0 +1,2 @@
+! command: show inventory
+NAME: "1", DESCR: "WS-C2960-24TT-L"

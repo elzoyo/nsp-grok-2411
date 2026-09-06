@@ -156,6 +156,21 @@ class Hueco:
 
 
 @dataclass
+class Salto:
+    """Hop acotado por OPE. Nunca crawl; siempre con objetivo explícito."""
+
+    hostname: str
+    ip: str
+    rol: str  # l2 | l3 | identidad
+    objetivo: str
+    origen: str  # cdp | lldp | ospf
+    estado: str = "propuesto"  # propuesto | aceptado | rechazado | ok | fallo
+    if_local: str = ""
+    detalle: str = ""
+    comandos: list[str] = field(default_factory=list)
+
+
+@dataclass
 class Inventario:
     nodo: Nodo
     rack: Rack = field(default_factory=Rack)
@@ -173,6 +188,7 @@ class Inventario:
     nat_flag: bool = False
     pim_neighbor: list[PimNeighbor] = field(default_factory=list)
     huecos: list[Hueco] = field(default_factory=list)
+    salto: list[Salto] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

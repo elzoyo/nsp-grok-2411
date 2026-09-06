@@ -1,0 +1,6 @@
+! command: show interfaces description
+Interface                      Status         Protocol Description
+Gi0/1                          up             up       uplink CE NOD-PAYSANDU-CE
+Gi0/2                          up             up       piso 1
+Gi0/3                          down           down
+Vlan10                         up             up       OPE

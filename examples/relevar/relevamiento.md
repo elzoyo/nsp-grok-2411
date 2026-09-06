@@ -46,6 +46,12 @@
 | CORP | S | 360 |
 | CORP | O | 240 |
 
+## Saltos a vecinos (consultados)
+
+| equipo | IP | rol | estado | objetivo |
+|--------|----|-----|--------|----------|
+| SW-PAYSANDU-L2 | 10.0.6.20 | l2 | ok | completar rack y L2 del predio (subset: version, VLAN, CDP, descripciones; sin LSDB ni show tech) |
+
 ## Conexiones (rack)
 
 | clase | medio | if_local | if_remota | equipo_remoto / sitio | ODF | origen |
@@ -60,3 +66,4 @@
 - `ospf_sin_cdp`: CORP vecino 10.1.1.1 en Gi1/0/24.110 sin CDP/LLDP
 - `ospf_sin_cdp`: TRA vecino 10.2.2.2 en Gi1/0/23.200 sin CDP/LLDP
 - `vrf_sin_igp`: VRF OPE sin OSPF
+- `vecino_de_vecino`: SW-PAYSANDU-L2 ve a AP-PAYSANDU-01 por cdp; no se salta en cadena

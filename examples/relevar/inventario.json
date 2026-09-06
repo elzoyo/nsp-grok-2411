@@ -38,7 +38,10 @@
       "ru_inicio": 18,
       "ru_alto": 1,
       "faceplate": [
-        "Gi1/0/1"
+        "Gi1/0/1",
+        "Gi0/1",
+        "Gi0/2",
+        "Gi0/3"
       ]
     }
   ],
@@ -327,6 +330,33 @@
     {
       "codigo": "vrf_sin_igp",
       "detalle": "VRF OPE sin OSPF"
+    },
+    {
+      "codigo": "vecino_de_vecino",
+      "detalle": "SW-PAYSANDU-L2 ve a AP-PAYSANDU-01 por cdp; no se salta en cadena"
+    }
+  ],
+  "salto": [
+    {
+      "hostname": "SW-PAYSANDU-L2",
+      "ip": "10.0.6.20",
+      "rol": "l2",
+      "objetivo": "completar rack y L2 del predio (subset: version, VLAN, CDP, descripciones; sin LSDB ni show tech)",
+      "origen": "cdp",
+      "estado": "ok",
+      "if_local": "Gi1/0/48",
+      "detalle": "SW-PAYSANDU-L2 IOS 1: WS-C2960-24TT-L",
+      "comandos": [
+        "show version",
+        "show running-config | include hostname",
+        "show inventory",
+        "show interfaces description",
+        "show vlan brief",
+        "show cdp neighbors",
+        "show cdp neighbors detail",
+        "show ip interface brief",
+        "show spanning-tree summary"
+      ]
     }
   ]
 }

@@ -105,6 +105,44 @@ def raw_get(raw: dict[str, str], *names: str) -> str:
     return ""
 
 
+IDENTITY_COMMANDS = [
+    "show version",
+    "show running-config | include hostname",
+    "show inventory",
+]
+
+L2_SUBSET = IDENTITY_COMMANDS + [
+    "show interfaces description",
+    "show vlan brief",
+    "show cdp neighbors",
+    "show cdp neighbors detail",
+    "show ip interface brief",
+    "show spanning-tree summary",
+]
+
+L3_SUBSET = IDENTITY_COMMANDS + [
+    "show vrf",
+    "show ip vrf interfaces",
+    "show interfaces description",
+    "show cdp neighbors detail",
+    "show standby brief",
+    "show ip interface brief",
+]
+
+
+def collect_commands(conn, commands: list[str], raw_dir: Path) -> dict[str, str]:
+    collected: dict[str, str] = {}
+    for cmd in commands:
+        try:
+            out = sshmod.send(conn, cmd)
+        except RelevarError:
+            out = ""
+        write_raw(raw_dir, cmd, out)
+        collected[cmd] = out
+        collected[slug(cmd)] = out
+    return collected
+
+
 def collect_live(
     host: str,
     user: str,
@@ -115,30 +153,31 @@ def collect_live(
     conn = sshmod.connect(host, user, password)
     collected: dict[str, str] = {}
     try:
-        for cmd in GLOBAL_COMMANDS:
-            try:
-                out = sshmod.send(conn, cmd)
-            except RelevarError:
-                out = ""
-            write_raw(raw_dir, cmd, out)
-            collected[cmd] = out
-            collected[slug(cmd)] = out
-        discovered = vrfs or _vrf_names_from_show(collected.get("show vrf") or collected.get("show ip vrf") or "")
+        collected.update(collect_commands(conn, GLOBAL_COMMANDS, raw_dir))
+        discovered = vrfs or _vrf_names_from_show(
+            collected.get("show vrf") or collected.get("show ip vrf") or ""
+        )
         if not discovered:
             discovered = ["default"]
-        for vrf in discovered:
-            for tmpl in VRF_COMMANDS:
-                cmd = tmpl.format(vrf=vrf)
-                try:
-                    out = sshmod.send(conn, cmd)
-                except RelevarError:
-                    out = ""
-                write_raw(raw_dir, cmd, out)
-                collected[cmd] = out
-                collected[slug(cmd)] = out
+        vrf_cmds = [tmpl.format(vrf=vrf) for vrf in discovered for tmpl in VRF_COMMANDS]
+        collected.update(collect_commands(conn, vrf_cmds, raw_dir))
     finally:
         sshmod.close(conn)
     return collected
+
+
+def collect_subset(
+    host: str,
+    user: str,
+    password: str,
+    raw_dir: Path,
+    commands: list[str],
+) -> dict[str, str]:
+    conn = sshmod.connect(host, user, password)
+    try:
+        return collect_commands(conn, commands, raw_dir)
+    finally:
+        sshmod.close(conn)
 
 
 def _vrf_names_from_show(raw: str) -> list[str]:

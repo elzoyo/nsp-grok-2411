@@ -76,6 +76,18 @@ def render_md(inv: Inventario) -> str:
         lines += ["", "## HSRP/VRRP", ""]
         for h in inv.hsrp_vrrp:
             lines.append(f"- `{h.iface}` grupo {h.grupo} VIP {h.vip} {h.estado}")
+    if inv.salto:
+        lines += [
+            "",
+            "## Saltos a vecinos (consultados)",
+            "",
+            "| equipo | IP | rol | estado | objetivo |",
+            "|--------|----|-----|--------|----------|",
+        ]
+        for s in inv.salto:
+            lines.append(
+                f"| {s.hostname or '—'} | {s.ip} | {s.rol} | {s.estado} | {s.objetivo} |"
+            )
     lines += [
         "",
         "## Conexiones (rack)",
