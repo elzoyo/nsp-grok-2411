@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shlex
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -13,7 +14,7 @@ from rich.text import Text
 from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
-from nsp_grok.models import Lsp, Task, User
+from nsp_grok.models import Lsp, Service, ServiceSite, Task, User
 from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
@@ -25,7 +26,7 @@ SLASH = {
     "help": "esta ayuda",
     "customers": "lista de clientes (subscr.Subscriber)",
     "customer": "muestra un cliente",
-    "services": "VPRN / VPLS / Epipe",
+    "services": "VPRN / VPLS / Epipe  (create|shutdown|delete)",
     "status": "resumen de sesión",
     "whoami": "usuario, rol, span of control",
     "ne": "elementos de red",
@@ -59,6 +60,7 @@ class Ctx:
     debug: bool = False
     live: bool = False
     client: NspClient | None = None
+    confirm: Callable[[str], bool] | None = None
 
     def node(self) -> Node:
         found = resolve(self.root, self.cwd, ".")
@@ -102,6 +104,7 @@ def _handlers():
         "customers": _customer,
         "service": _service,
         "services": _service,
+        "create": _create_cmd,
         "stats": _stats,
         "resync": _resync,
         "topology": lambda c, a: Outcome(renderable=render.topology_ascii()),
@@ -566,33 +569,17 @@ def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
     if action == "create":
         return _lsp_create(ctx, args[1:])
     if action in ("shutdown", "shut") and len(args) >= 2:
-        return _lsp_admin(ctx, args[1], "down")
+        rest, flag = _split_confirm(args[1:])
+        if not rest:
+            return Outcome(error="uso: mpls lsp shutdown <n> [confirm=yes]")
+        return _lsp_admin(ctx, rest[0], "down", flag)
     if action in ("turnup", "no-shutdown") and len(args) >= 2:
-        return _lsp_admin(ctx, args[1], "up")
+        rest, flag = _split_confirm(args[1:])
+        if not rest:
+            return Outcome(error="uso: mpls lsp turnup <n>")
+        return _lsp_admin(ctx, rest[0], "up", flag)
     if action == "delete" and len(args) >= 2:
-        if not can(ctx.user, "write"):
-            return Outcome(error="permiso denegado (write)")
-        name = args[1]
-        lsp = ctx.store.lsps.get(name)
-        if lsp is None:
-            return Outcome(error=f"LSP desconocido: {name}")
-        if ctx.live and ctx.client is not None:
-            if not lsp.fdn:
-                return Outcome(
-                    error=f"el LSP {name} no tiene FDN live; no se borra en el NSP"
-                )
-            ctx.client.delete_lsp(lsp.fdn)
-            err = _load_live_mpls(ctx)
-            if err is not None:
-                return err
-            if name in ctx.store.lsps:
-                del ctx.store.lsps[name]
-                ctx.rebuild()
-        else:
-            del ctx.store.lsps[name]
-            ctx.rebuild()
-        _task(ctx, f"delete LSP {name}", f"lsp:{name}")
-        return Outcome(renderable=Text(f"eliminado {name}", style="green"))
+        return _lsp_delete(ctx, args[1:])
     # treat first arg as name
     lsp = ctx.store.lsps.get(args[0])
     if lsp:
@@ -611,16 +598,61 @@ def _parse_kv(args: list[str]) -> dict[str, str]:
     return out
 
 
+CONFIRM_YES = {"yes", "y", "si", "sí", "s", "true", "1"}
+CONFIRM_NO = {"no", "n", "false", "0"}
+
+
+def _split_confirm(args: list[str]) -> tuple[list[str], str | None]:
+    rest: list[str] = []
+    flag: str | None = None
+    for a in args:
+        low = a.lower()
+        if low.startswith("confirm="):
+            flag = a.split("=", 1)[1].strip().lower()
+        elif low in ("-y", "--yes"):
+            flag = "yes"
+        elif low in ("-n", "--no"):
+            flag = "no"
+        else:
+            rest.append(a)
+    return rest, flag
+
+
+def _require_confirm(ctx: Ctx, message: str, flag: str | None) -> Outcome | None:
+    """None = proceed. Outcome = abort. Create and destructive writes always ask."""
+    if flag is not None:
+        if flag in CONFIRM_YES:
+            return None
+        return Outcome(error="cancelado")
+    if ctx.confirm is not None:
+        try:
+            if ctx.confirm(message):
+                return None
+        except UserCancelled:
+            raise
+        except (KeyboardInterrupt, EOFError) as exc:
+            raise UserCancelled("Cancelado con Ctrl-C.") from exc
+        return Outcome(error="cancelado")
+    return Outcome(
+        error=f"hace falta confirmación: {message}  (agregá confirm=yes o respondé en el REPL)"
+    )
+
+
+def _backend_label(ctx: Ctx) -> str:
+    return f"NSP {ctx.nsp_host}" if ctx.live else "lab local"
+
+
 def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     if not can(ctx.user, "write"):
         return Outcome(error="permiso denegado (write)")
-    kv = _parse_kv(args)
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
     name = kv.get("name")
     src = kv.get("from")
     dst = kv.get("to")
     if not name or not src or not dst:
         return Outcome(
-            error="uso: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P] [id=N]"
+            error="uso: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P] [id=N] [confirm=yes]"
         )
     if name in ctx.store.lsps:
         return Outcome(error=f"el LSP ya existe: {name}")
@@ -635,6 +667,13 @@ def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     hops = path.hops if path else [src_name, dst_name]
     lsp_type = kv.get("type", "dynamic")
     path_id = kv.get("id", "")
+    denied = _require_confirm(
+        ctx,
+        f"Crear LSP {name} {src_name}->{dst_name} ({lsp_type}) en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
     if ctx.live and ctx.client is not None:
         if not src_ip or not dst_ip:
             return Outcome(error="el NE origen/destino no tiene system IP (siteId)")
@@ -684,12 +723,24 @@ def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(renderable=Group(Text("creado", style="green"), render.show_lsp(lsp)))
 
 
-def _lsp_admin(ctx: Ctx, name: str, admin: str) -> Outcome:
+def _lsp_admin(ctx: Ctx, name: str, admin: str, flag: str | None = None) -> Outcome:
     if not can(ctx.user, "write"):
         return Outcome(error="permiso denegado (write)")
     lsp = ctx.store.lsps.get(name)
     if lsp is None:
         return Outcome(error=f"LSP desconocido: {name}")
+    if admin == "down":
+        if ctx.live and ctx.client is not None and not lsp.fdn:
+            return Outcome(
+                error=f"el LSP {name} no tiene FDN live; no se cambia en el NSP"
+            )
+        denied = _require_confirm(
+            ctx,
+            f"Apagar (shutdown) LSP {name} en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
     if ctx.live and ctx.client is not None:
         if not lsp.fdn:
             return Outcome(
@@ -705,6 +756,40 @@ def _lsp_admin(ctx: Ctx, name: str, admin: str) -> Outcome:
     verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
     _task(ctx, f"{verb} LSP {name}", f"lsp:{name}")
     return Outcome(renderable=Text(f"{name} {verb}", style="green"))
+
+
+def _lsp_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: mpls lsp delete <n> [confirm=yes]")
+    name = rest[0]
+    lsp = ctx.store.lsps.get(name)
+    if lsp is None:
+        return Outcome(error=f"LSP desconocido: {name}")
+    if ctx.live and ctx.client is not None and not lsp.fdn:
+        return Outcome(error=f"el LSP {name} no tiene FDN live; no se borra en el NSP")
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar LSP {name} en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.delete_lsp(lsp.fdn)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        if name in ctx.store.lsps:
+            del ctx.store.lsps[name]
+            ctx.rebuild()
+    else:
+        del ctx.store.lsps[name]
+        ctx.rebuild()
+    _task(ctx, f"delete LSP {name}", f"lsp:{name}")
+    return Outcome(renderable=Text(f"eliminado {name}", style="green"))
 
 
 def _customer(ctx: Ctx, args: list[str]) -> Outcome:
@@ -738,8 +823,16 @@ def _service(ctx: Ctx, args: list[str]) -> Outcome:
     svcs = list(ctx.store.visible_services(ctx.user).values())
     if not args:
         return Outcome(renderable=render.service_table(svcs))
+    action = args[0].lower()
+    if action == "create":
+        return _service_create(ctx, args[1:])
+    if action in ("shutdown", "shut") and len(args) >= 2:
+        return _service_admin(ctx, args[1:], "down")
+    if action in ("turnup", "no-shutdown") and len(args) >= 2:
+        return _service_admin(ctx, args[1:], "up")
+    if action == "delete" and len(args) >= 2:
+        return _service_delete(ctx, args[1:])
     if args[0].isdigit() and int(args[0]) in ctx.store.customers:
-        # /services 12 → services of customer 12
         cid = int(args[0])
         if cid not in ctx.store.visible_customers(ctx.user):
             return Outcome(error=f"cliente fuera del span: {cid}")
@@ -750,6 +843,244 @@ def _service(ctx: Ctx, args: list[str]) -> Outcome:
         return Outcome(error=f"servicio desconocido: {key}")
     ctx.cwd = ["customers", str(svc.customer_id), svc.svc_type, str(svc.svc_id)]
     return Outcome(renderable=render.show_service(svc))
+
+
+def _create_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    if ctx.cwd[:1] == ["mpls"]:
+        return _lsp_create(ctx, args)
+    return _service_create(ctx, args)
+
+
+def _cwd_customer_id(ctx: Ctx) -> int | None:
+    if ctx.cwd[:1] == ["customers"] and len(ctx.cwd) >= 2 and ctx.cwd[1].isdigit():
+        return int(ctx.cwd[1])
+    return None
+
+
+def _cwd_svc_type(ctx: Ctx) -> str:
+    if len(ctx.cwd) >= 3 and ctx.cwd[0] == "customers" and ctx.cwd[2] in {"vprn", "vpls", "epipe"}:
+        return ctx.cwd[2]
+    return ""
+
+
+def _find_service(ctx: Ctx, key: str) -> Service | None:
+    svcs = ctx.store.visible_services(ctx.user)
+    if key.isdigit() and int(key) in svcs:
+        return svcs[int(key)]
+    return next((s for s in svcs.values() if s.name == key or str(s.svc_id) == key), None)
+
+
+def _reload_customer_services(ctx: Ctx, customer_id: int) -> Outcome | None:
+    if not ctx.live or ctx.client is None:
+        return None
+    cust = ctx.store.customers.get(customer_id)
+    name = cust.displayed_name if cust else ""
+    try:
+        ctx.store.apply_services(customer_id, ctx.client.load_services(customer_id), name)
+        ctx.rebuild()
+    except UserCancelled:
+        raise
+    except KeyboardInterrupt as exc:
+        raise UserCancelled("Cancelado con Ctrl-C.") from exc
+    except NspApiError as exc:
+        return Outcome(error=str(exc), quit=True)
+    except Exception as exc:
+        return Outcome(error=_unexpected(exc), quit=True)
+    return None
+
+
+def _parse_site_tokens(ctx: Ctx, raw: str) -> tuple[list[str], list[str], Outcome | None]:
+    """Return (ne names, site IPs, error)."""
+    names: list[str] = []
+    ips: list[str] = []
+    if not raw.strip():
+        return names, ips, None
+    for tok in raw.split(","):
+        token = tok.strip()
+        if not token:
+            continue
+        ep = _ne_endpoint(ctx, token)
+        if ep is None:
+            return [], [], Outcome(error=f"NE fuera del span of control: {token}")
+        name, ip = ep
+        if not ip:
+            return [], [], Outcome(error=f"el NE {name} no tiene system IP (siteId)")
+        names.append(name)
+        ips.append(ip)
+    return names, ips, None
+
+
+def _service_create(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
+    if rest and rest[0].lower() in {"vprn", "vpls", "epipe"} and "type" not in kv:
+        kv["type"] = rest[0].lower()
+    svc_type = (kv.get("type") or _cwd_svc_type(ctx)).lower()
+    if svc_type not in {"vprn", "vpls", "epipe"}:
+        return Outcome(
+            error=(
+                "uso: service create type=vprn|vpls|epipe id=<serviceId> "
+                "customer=<id> name=<nombre> [sites=NE,NE] [desc=...] [confirm=yes]"
+            )
+        )
+    cust_raw = kv.get("customer") or kv.get("subscriber") or ""
+    customer_id: int | None
+    if cust_raw.isdigit():
+        customer_id = int(cust_raw)
+    else:
+        customer_id = _cwd_customer_id(ctx)
+        if not customer_id and cust_raw:
+            found = next(
+                (
+                    c
+                    for c in ctx.store.visible_customers(ctx.user).values()
+                    if c.displayed_name.lower() == cust_raw.lower()
+                ),
+                None,
+            )
+            customer_id = found.subscriber_id if found else None
+    if customer_id is None:
+        return Outcome(error="service create: customer=<id> (o contexto customers/<id>)")
+    if customer_id not in ctx.store.visible_customers(ctx.user):
+        return Outcome(error=f"cliente fuera del span: {customer_id}")
+    id_raw = kv.get("id") or kv.get("serviceid") or kv.get("svc") or ""
+    svc_id: int | None = int(id_raw) if id_raw.isdigit() else None
+    if svc_id is None:
+        svc_id = max(ctx.store.services, default=0) + 1
+    if svc_id in ctx.store.services:
+        return Outcome(error=f"el servicio ya existe: {svc_id}")
+    name = kv.get("name") or kv.get("displayedname") or f"{svc_type}-{svc_id}"
+    description = kv.get("desc") or kv.get("description") or ""
+    site_names, site_ips, site_err = _parse_site_tokens(ctx, kv.get("sites", ""))
+    if site_err is not None:
+        return site_err
+    cust = ctx.store.customers[customer_id]
+    sites_txt = ",".join(site_names) if site_names else "(sin sites)"
+    denied = _require_confirm(
+        ctx,
+        (
+            f"Crear {svc_type.upper()} serviceId={svc_id} cliente={customer_id} "
+            f"({cust.displayed_name}) name={name} sites={sites_txt} "
+            f"en {_backend_label(ctx)}"
+        ),
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.create_service(
+            svc_type,
+            customer_id,
+            svc_id,
+            name,
+            description,
+            site_ips,
+        )
+        err = _reload_customer_services(ctx, customer_id)
+        if err is not None:
+            return err
+        created = ctx.store.services.get(svc_id)
+        if created is None:
+            created = Service(
+                svc_id=svc_id,
+                name=name,
+                svc_type=svc_type,
+                customer=cust.displayed_name,
+                customer_id=customer_id,
+                sites=site_names,
+                description=description,
+            )
+            ctx.store.add_service(created)
+            ctx.rebuild()
+        _task(ctx, f"create {svc_type} {svc_id}", created.fdn)
+        return Outcome(
+            renderable=Group(
+                Text("creado en NSP (configureChildInstance, no automático)", style="green"),
+                render.show_service(created),
+            )
+        )
+    sites = [
+        ServiceSite(svc_id=svc_id, site_id=ip, ne=ne_name)
+        for ne_name, ip in zip(site_names, site_ips)
+    ]
+    created = Service(
+        svc_id=svc_id,
+        name=name,
+        svc_type=svc_type,
+        customer=cust.displayed_name,
+        customer_id=customer_id,
+        sites=site_names,
+        description=description,
+    )
+    ctx.store.add_service(created, sites)
+    ctx.rebuild()
+    _task(ctx, f"create {svc_type} {svc_id}", created.fdn)
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_service(created)))
+
+
+def _service_admin(ctx: Ctx, args: list[str], admin: str) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: service shutdown|turnup <id> [confirm=yes]")
+    svc = _find_service(ctx, rest[0])
+    if svc is None:
+        return Outcome(error=f"servicio desconocido: {rest[0]}")
+    if admin == "down":
+        denied = _require_confirm(
+            ctx,
+            f"Apagar (shutdown) {svc.svc_type.upper()} {svc.svc_id} ({svc.name}) en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.configure_service_admin(svc.fdn, svc.svc_type, admin)
+        err = _reload_customer_services(ctx, svc.customer_id)
+        if err is not None:
+            return err
+        svc = ctx.store.services.get(svc.svc_id) or svc
+    svc.admin = admin  # type: ignore[assignment]
+    svc.oper = admin  # type: ignore[assignment]
+    verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
+    _task(ctx, f"{verb} {svc.svc_type} {svc.svc_id}", svc.fdn)
+    return Outcome(renderable=Text(f"{svc.svc_type} {svc.svc_id} {verb}", style="green"))
+
+
+def _service_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: service delete <id> [confirm=yes]")
+    svc = _find_service(ctx, rest[0])
+    if svc is None:
+        return Outcome(error=f"servicio desconocido: {rest[0]}")
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar {svc.svc_type.upper()} {svc.svc_id} ({svc.name}) FDN {svc.fdn} en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    sid = svc.svc_id
+    cid = svc.customer_id
+    if ctx.live and ctx.client is not None:
+        ctx.client.delete_service(svc.fdn)
+        err = _reload_customer_services(ctx, cid)
+        if err is not None:
+            return err
+        if sid in ctx.store.services:
+            ctx.store.remove_service(sid)
+            ctx.rebuild()
+    else:
+        ctx.store.remove_service(sid)
+        ctx.rebuild()
+    _task(ctx, f"delete service {sid}", svc.fdn)
+    return Outcome(renderable=Text(f"eliminado {svc.svc_type} {sid}", style="green"))
 
 
 def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
@@ -770,7 +1101,10 @@ def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
     if action == "clear" and len(args) >= 2:
         if not can(ctx.user, "execute"):
             return Outcome(error="permiso denegado (execute) — no se puede limpiar la alarma")
-        return _alarm_mutate(ctx, args[1], clear=True)
+        rest, flag = _split_confirm(args[1:])
+        if not rest:
+            return Outcome(error="uso: alarm clear <id> [confirm=yes]")
+        return _alarm_mutate(ctx, rest[0], clear=True, flag=flag)
     if action in ("critical", "major", "minor", "warning"):
         alarms = [a for a in alarms if a.severity == action]
         return Outcome(renderable=render.alarm_table(alarms))
@@ -780,7 +1114,9 @@ def _alarm(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(error="uso: alarm [list|ack <id>|clear <id>|<id>|<severity>]")
 
 
-def _alarm_mutate(ctx: Ctx, alarm_id: str, ack: bool = False, clear: bool = False) -> Outcome:
+def _alarm_mutate(
+    ctx: Ctx, alarm_id: str, ack: bool = False, clear: bool = False, flag: str | None = None
+) -> Outcome:
     alarm = next((a for a in ctx.store.alarms if a.id == alarm_id), None)
     if alarm is None:
         return Outcome(error=f"alarma desconocida: {alarm_id}")
@@ -790,6 +1126,13 @@ def _alarm_mutate(ctx: Ctx, alarm_id: str, ack: bool = False, clear: bool = Fals
         _task(ctx, f"acknowledge {alarm_id}", alarm.object_fdn)
         return Outcome(renderable=Text(f"{alarm_id} reconocida", style="green"))
     if clear:
+        denied = _require_confirm(
+            ctx,
+            f"Limpiar alarma {alarm_id} ({alarm.probable_cause}) en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
         alarm.cleared = True
         alarm.severity = "cleared"
         _task(ctx, f"clear {alarm_id}", alarm.object_fdn)
@@ -874,12 +1217,20 @@ def _cpaa_cmd(ctx: Ctx, args: list[str]) -> Outcome:
             return Outcome(error="permiso denegado (write) — query 17 modifica el CPAA")
         if not ctx.live or ctx.client is None:
             return Outcome(error="query 17 requiere backend NSP en vivo (no lab)")
-        fdn = args[2] if len(args) >= 3 else (ctx.store.cpaa[0].fdn if ctx.store.cpaa else "")
+        rest, flag = _split_confirm(args[2:])
+        fdn = rest[0] if rest else (ctx.store.cpaa[0].fdn if ctx.store.cpaa else "")
         if not fdn:
             ctx.store.apply_cpaa(ctx.client.load_cpaa())
             fdn = ctx.store.cpaa[0].fdn if ctx.store.cpaa else ""
         if not fdn:
-            return Outcome(error="uso: cpaa record bgp [network:<ip>:cpaa]")
+            return Outcome(error="uso: cpaa record bgp [network:<ip>:cpaa] [confirm=yes]")
+        denied = _require_confirm(
+            ctx,
+            f"Modificar CPAA {fdn} (protocolRecord+=bgp) en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
         current = next((c for c in ctx.store.cpaa if c.fdn == fdn), None)
         applied = ctx.client.configure_cpaa_bgp_record(fdn, current)
         ctx.store.apply_cpaa(ctx.client.load_cpaa())

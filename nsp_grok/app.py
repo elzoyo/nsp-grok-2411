@@ -20,7 +20,7 @@ from rich.text import Text
 
 from nsp_grok import PRODUCT, RELEASE
 from nsp_grok.auth import authenticate, hash_password
-from nsp_grok.commands import DEFAULT_NSP_HOST, Ctx, Outcome, dispatch
+from nsp_grok.commands import CONFIRM_YES, DEFAULT_NSP_HOST, Ctx, Outcome, dispatch
 from nsp_grok.completer import NspCompleter
 from nsp_grok.lab import Store
 from nsp_grok.models import User
@@ -226,7 +226,15 @@ def apply_outcome(out: Outcome) -> bool:
     return not out.quit
 
 
+def _repl_confirm(message: str) -> bool:
+    from prompt_toolkit import prompt as pt_prompt
+
+    answer = pt_prompt(f"{message} [sí/no]: ")
+    return answer.strip().lower() in CONFIRM_YES
+
+
 def run_repl(ctx: Ctx) -> int:
+    ctx.confirm = _repl_confirm
     history: FileHistory | None = None
     try:
         HISTORY_FILE.touch(exist_ok=True)

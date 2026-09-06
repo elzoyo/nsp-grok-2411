@@ -4,7 +4,7 @@ Shell de gestión **IP/MPLS** inspirado en Nokia **NFM-P / NSP Classic Managemen
 
 No replica la GUI Java. El operador inicia sesión y queda en una consola: prompt `usuario@IP_NSP>`, comandos anidados tipo Fire / SR OS, slash commands, Tab-complete y barra de estado.
 
-Alcance de esta instancia: **solo lectura**. Clientes primero (`subscr.Subscriber`), después solo **VPRN / VPLS / Epipe**, detalle del servicio y objetos relacionados. No crea servicios.
+Alcance: clientes primero (`subscr.Subscriber`), después **VPRN / VPLS / Epipe**. Create / shutdown / delete piden confirmación (`sí/no` en el REPL o `confirm=yes` en batch).
 
 ## Arranque
 
@@ -48,6 +48,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 - Live CPAM: queries 10–14 (Cpaa, AS IGP, AS BGP, RIB/RT). Stats on-demand (`timeCaptured`).
 - Live equipos: `netw.NetworkElement` al entrar a `equipment`; puertos `equipment.PhysicalPort` por `network:<siteId>:%`.
 - Live MPLS: LSPs por `sourceNodeId` del NE (`mpls.DynamicLsp` y hermanas), SDP `svt.Tunnel` e interfaces `mpls.Interface` con wildcard `network:<siteId>:%`. Create/shutdown/delete explícitos (configureChildInstance / configureInstance / deleteInstance); no automáticos.
+- Create de servicios VPRN/VPLS/Epipe (`svc-mgr` + `subscriberPointer`, sites opcionales). Toda escritura destructiva (create/shutdown/delete/alarm clear/query 17) pide confirmación.
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -70,7 +71,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto:** primera instancia no crea servicios. MPLS create/shutdown/delete es live (XML explícito, igual que query 17). Query 17 es `cpaa record bgp [fdn]`. Equipos live al navegar `equipment`.
+**Producto:** create de VPRN/VPLS/Epipe (`configureChildInstance` en `svc-mgr`) y MPLS, con confirmación. Shutdown/delete (servicio, LSP, alarm clear) y query 17 también piden confirmación. Equipos live al navegar `equipment`.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 

@@ -173,8 +173,8 @@ def build_lsp_admin_xml(fdn: str, admin: str, class_name: str = "") -> str:
     )
 
 
-def build_lsp_delete_xml(fdn: str) -> str:
-    """deleteInstance on an existing LSP. Explicit write."""
+def build_delete_instance_xml(fdn: str) -> str:
+    """generic.GenericObject.deleteInstance. Explicit write."""
     from xml.sax.saxutils import escape
 
     return (
@@ -184,6 +184,97 @@ def build_lsp_delete_xml(fdn: str) -> str:
         "<synchronousDeploy>true</synchronousDeploy>"
         f"<distinguishedName>{escape(fdn)}</distinguishedName>"
         "</generic.GenericObject.deleteInstance>"
+    )
+
+
+def build_lsp_delete_xml(fdn: str) -> str:
+    """deleteInstance on an existing LSP. Explicit write."""
+    return build_delete_instance_xml(fdn)
+
+
+SVC_XML_CLASS = {
+    "vprn": "vprn.Vprn",
+    "vpls": "vpls.Vpls",
+    "epipe": "epipe.Epipe",
+}
+SVC_SITE_XML_CLASS = {
+    "vprn": "vprn.Site",
+    "vpls": "vpls.Site",
+    "epipe": "epipe.Site",
+}
+
+
+def _svc_xml_class(svc_type: str) -> str:
+    kind = (svc_type or "").lower()
+    if kind not in SVC_XML_CLASS:
+        raise NspApiError("tipo de servicio: vprn | vpls | epipe")
+    return SVC_XML_CLASS[kind]
+
+
+def build_service_create_xml(
+    svc_type: str,
+    subscriber_id: int,
+    service_id: int | None = None,
+    name: str = "",
+    description: str = "",
+    site_ips: list[str] | None = None,
+) -> str:
+    """configureChildInstance on svc-mgr. Explicit write; never auto."""
+    from xml.sax.saxutils import escape
+
+    cls = _svc_xml_class(svc_type)
+    site_cls = SVC_SITE_XML_CLASS[svc_type.lower()]
+    id_xml = f"<serviceId>{int(service_id)}</serviceId>" if service_id else ""
+    name_xml = f"<displayedName>{escape(name)}</displayedName>" if name else ""
+    desc_xml = f"<description>{escape(description)}</description>" if description else ""
+    children = ""
+    if site_ips:
+        sites_xml = "".join(
+            f"<{site_cls}>"
+            "<actionMask><bit>create</bit></actionMask>"
+            f"<siteId>{escape(ip)}</siteId>"
+            f"</{site_cls}>"
+            for ip in site_ips
+            if ip
+        )
+        if sites_xml:
+            children = f"<children-Set>{sites_xml}</children-Set>"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        "<distinguishedName>svc-mgr</distinguishedName>"
+        "<childConfigInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<subscriberPointer>subscriber:{int(subscriber_id)}</subscriberPointer>"
+        f"{id_xml}{name_xml}{desc_xml}{children}"
+        f"</{cls}>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_service_admin_xml(fdn: str, svc_type: str, admin: str) -> str:
+    """configureInstance administrativeState on a service. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = _svc_xml_class(svc_type)
+    state = "down" if admin == "down" else "up"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<administrativeState>{state}</administrativeState>"
+        f"</{cls}>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
     )
 
 
@@ -882,6 +973,39 @@ class NspClient:
         if not fdn:
             raise NspApiError("hace falta el FDN del LSP para borrar")
         self._post_xml(build_lsp_delete_xml(fdn), "mpls lsp delete")
+        return fdn
+
+    def create_service(
+        self,
+        svc_type: str,
+        subscriber_id: int,
+        service_id: int | None = None,
+        name: str = "",
+        description: str = "",
+        site_ips: list[str] | None = None,
+    ) -> None:
+        """Explicit write: configureChildInstance under svc-mgr. Never auto."""
+        if subscriber_id <= 0:
+            raise NspApiError("service create: customer/subscriber es obligatorio")
+        self._post_xml(
+            build_service_create_xml(
+                svc_type, subscriber_id, service_id, name, description, site_ips
+            ),
+            "service create",
+        )
+
+    def configure_service_admin(self, fdn: str, svc_type: str, admin: str) -> str:
+        """Explicit write: configureInstance administrativeState. Never auto."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del servicio (svc-mgr:service-<id>)")
+        self._post_xml(build_service_admin_xml(fdn, svc_type, admin), "service admin")
+        return fdn
+
+    def delete_service(self, fdn: str) -> str:
+        """Explicit write: deleteInstance. Never auto."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del servicio para borrar")
+        self._post_xml(build_delete_instance_xml(fdn), "service delete")
         return fdn
 
     def load_igp_domains(self) -> list[TopologyAs]:

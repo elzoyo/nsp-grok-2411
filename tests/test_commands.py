@@ -55,11 +55,11 @@ def test_create_and_shutdown_lsp():
     ctx = _admin_ctx()
     out = dispatch(
         ctx,
-        "mpls lsp create name=lsp-test from=PE-BAIRES-01 to=PE-CORDOBA-01 type=dynamic sig=rsvp",
+        "mpls lsp create name=lsp-test from=PE-BAIRES-01 to=PE-CORDOBA-01 type=dynamic sig=rsvp confirm=yes",
     )
     assert out.error == ""
     assert "lsp-test" in ctx.store.lsps
-    out = dispatch(ctx, "mpls lsp shutdown lsp-test")
+    out = dispatch(ctx, "mpls lsp shutdown lsp-test confirm=yes")
     assert ctx.store.lsps["lsp-test"].admin == "down"
 
 
@@ -117,7 +117,7 @@ def test_live_lsp_create_posts_to_nsp():
     ctx.client = client
     out = dispatch(
         ctx,
-        "mpls lsp create name=lsp-live from=PE-BAIRES-01 to=PE-CORDOBA-01 type=dynamic",
+        "mpls lsp create name=lsp-live from=PE-BAIRES-01 to=PE-CORDOBA-01 type=dynamic confirm=yes",
     )
     assert out.error == ""
     assert client.created == [
@@ -144,7 +144,7 @@ def test_live_lsp_shutdown_posts_configure_instance():
     lsp = ctx.store.lsps["lsp-ba-cba"]
     lsp.fdn = "lsp:from-10.10.1.1-id-1"
     lsp.class_name = "mpls.DynamicLsp"
-    out = dispatch(ctx, "mpls lsp shutdown lsp-ba-cba")
+    out = dispatch(ctx, "mpls lsp shutdown lsp-ba-cba confirm=yes")
     assert out.error == ""
     assert client.admin == [("lsp:from-10.10.1.1-id-1", "down", "mpls.DynamicLsp")]
     assert ctx.store.lsps["lsp-ba-cba"].admin == "down"
@@ -289,3 +289,140 @@ def test_unknown_command_does_not_quit():
     out = dispatch(ctx, "blargh")
     assert out.quit is False
     assert "comando desconocido" in out.error
+
+
+def test_create_requires_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "service create type=vprn id=201 customer=12 name=vpn-test",
+    )
+    assert "confirmación" in out.error
+    assert 201 not in ctx.store.services
+
+
+def test_create_cancelled_with_confirm_no():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "service create type=vprn id=201 customer=12 name=vpn-test confirm=no",
+    )
+    assert out.error == "cancelado"
+    assert 201 not in ctx.store.services
+
+
+def test_create_service_lab_with_confirm_yes():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "service create type=vprn id=201 customer=12 name=vpn-test sites=PE-BAIRES-01 confirm=yes",
+    )
+    assert out.error == ""
+    svc = ctx.store.services[201]
+    assert svc.svc_type == "vprn"
+    assert svc.customer_id == 12
+    assert svc.name == "vpn-test"
+    assert "PE-BAIRES-01" in svc.sites
+    sites = [s for s in ctx.store.sites if s.svc_id == 201]
+    assert sites[0].site_id == "10.10.1.1"
+
+
+def test_create_service_uses_cwd_customer():
+    ctx = _admin_ctx()
+    dispatch(ctx, "customers 12")
+    out = dispatch(ctx, "service create type=vpls id=202 name=elan-test confirm=yes")
+    assert out.error == ""
+    assert ctx.store.services[202].customer_id == 12
+    assert ctx.store.services[202].svc_type == "vpls"
+    out = dispatch(ctx, "create type=epipe id=203 name=eline-cwd confirm=yes")
+    assert out.error == ""
+    assert ctx.store.services[203].customer_id == 12
+    assert ctx.store.services[203].svc_type == "epipe"
+
+
+def test_service_shutdown_and_delete_need_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "service shutdown 100")
+    assert "confirmación" in out.error
+    assert ctx.store.services[100].admin == "up"
+    out = dispatch(ctx, "service shutdown 100 confirm=yes")
+    assert out.error == ""
+    assert ctx.store.services[100].admin == "down"
+    out = dispatch(ctx, "service delete 100 confirm=no")
+    assert out.error == "cancelado"
+    assert 100 in ctx.store.services
+    out = dispatch(ctx, "service delete 100 confirm=yes")
+    assert out.error == ""
+    assert 100 not in ctx.store.services
+
+
+def test_confirm_callback_yes():
+    ctx = _admin_ctx()
+    asked: list[str] = []
+
+    def _ask(msg: str) -> bool:
+        asked.append(msg)
+        return True
+
+    ctx.confirm = _ask
+    out = dispatch(ctx, "mpls lsp shutdown lsp-ba-cba")
+    assert out.error == ""
+    assert asked and "shutdown" in asked[0]
+    assert ctx.store.lsps["lsp-ba-cba"].admin == "down"
+
+
+def test_alarm_clear_needs_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "alarm clear A-1001")
+    assert "confirmación" in out.error
+    alarm = next(a for a in ctx.store.alarms if a.id == "A-1001")
+    assert alarm.cleared is False
+    out = dispatch(ctx, "alarm clear A-1001 confirm=yes")
+    assert out.error == ""
+    assert alarm.cleared is True
+
+
+def test_viewer_cannot_create_service():
+    ctx = _viewer_ctx()
+    out = dispatch(
+        ctx,
+        "service create type=vprn id=201 customer=12 name=x confirm=yes",
+    )
+    assert "permiso denegado" in out.error
+
+
+class _LiveServiceClient:
+    def __init__(self) -> None:
+        self.created: list[tuple] = []
+        self.admin: list[tuple] = []
+        self.deleted: list[str] = []
+
+    def load_services(self, subscriber_id: int):
+        return []
+
+    def create_service(self, svc_type, subscriber_id, service_id=None, name="", description="", site_ips=None):
+        self.created.append((svc_type, subscriber_id, service_id, name, tuple(site_ips or [])))
+
+    def configure_service_admin(self, fdn, svc_type, admin):
+        self.admin.append((fdn, svc_type, admin))
+        return fdn
+
+    def delete_service(self, fdn):
+        self.deleted.append(fdn)
+        return fdn
+
+
+def test_live_service_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveServiceClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "service create type=epipe id=310 customer=33 name=eline-x sites=PE-BAIRES-01,PE-ROSARIO-01 confirm=yes",
+    )
+    assert out.error == ""
+    assert client.created == [
+        ("epipe", 33, 310, "eline-x", ("10.10.1.1", "10.10.3.1"))
+    ]
+    assert ctx.store.services[310].svc_type == "epipe"

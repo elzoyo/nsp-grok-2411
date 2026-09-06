@@ -26,6 +26,7 @@ VERBS = [
     "customers",
     "service",
     "services",
+    "create",
     "stats",
     "resync",
     "topology",
@@ -78,6 +79,10 @@ class NspCompleter(Completer):
                 if token.startswith(current) or cust.displayed_name.lower().startswith(current.lower()):
                     yield Completion(token, start_position=-len(current), display_meta=cust.displayed_name)
         elif verb in ("service", "services"):
+            if len(parts) == 1 or (len(parts) == 2 and not text.endswith(" ")):
+                for w in ("create", "shutdown", "turnup", "delete"):
+                    if w.startswith(current):
+                        yield Completion(w, start_position=-len(current))
             for sid, svc in self.ctx.store.visible_services(self.ctx.user).items():
                 token = str(sid)
                 if token.startswith(current) or svc.name.startswith(current):

@@ -9,6 +9,9 @@ from nsp_grok.nsp_api import (
     build_lsp_admin_xml,
     build_lsp_create_xml,
     build_lsp_delete_xml,
+    build_service_admin_xml,
+    build_service_create_xml,
+    build_delete_instance_xml,
     raise_if_xml_fault,
     _alarm_from_row,
     _binding_from_row,
@@ -822,3 +825,35 @@ def test_lsp_from_row_keeps_fdn():
     assert lsp.fdn == "lsp:from-10.10.1.1-id-1"
     assert lsp.class_name == "mpls.DynamicLsp"
     assert lsp.path_id == "1"
+
+
+def test_service_create_xml_vprn_with_sites():
+    xml = build_service_create_xml(
+        "vprn",
+        12,
+        200,
+        "VPN-X",
+        "sucursales",
+        ["10.10.1.1", "10.10.2.1"],
+    )
+    assert "generic.GenericObject.configureChildInstance" in xml
+    assert "<distinguishedName>svc-mgr</distinguishedName>" in xml
+    assert "<vprn.Vprn>" in xml
+    assert "<subscriberPointer>subscriber:12</subscriberPointer>" in xml
+    assert "<serviceId>200</serviceId>" in xml
+    assert "<displayedName>VPN-X</displayedName>" in xml
+    assert "<vprn.Site>" in xml
+    assert "<siteId>10.10.1.1</siteId>" in xml
+    assert "<children-Set>" in xml
+
+
+def test_service_create_xml_epipe_escapes_and_admin():
+    xml = build_service_create_xml("epipe", 1, None, "a&b")
+    assert "<epipe.Epipe>" in xml
+    assert "&amp;" in xml
+    assert "a&b" not in xml
+    assert "<serviceId>" not in xml
+    down = build_service_admin_xml("svc-mgr:service-9", "vpls", "down")
+    assert "<vpls.Vpls>" in down
+    assert "<administrativeState>down</administrativeState>" in down
+    assert "generic.GenericObject.deleteInstance" in build_delete_instance_xml("svc-mgr:service-9")

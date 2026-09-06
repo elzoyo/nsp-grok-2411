@@ -943,6 +943,24 @@ class Store:
         if ne is not None:
             ne.cards = cards
 
+    def add_service(self, svc: Service, sites: list[ServiceSite] | None = None) -> None:
+        self.services[svc.svc_id] = svc
+        if sites:
+            self.sites = [s for s in self.sites if s.svc_id != svc.svc_id] + list(sites)
+
+    def remove_service(self, svc_id: int) -> None:
+        self.services.pop(svc_id, None)
+        self.sites = [s for s in self.sites if s.svc_id != svc_id]
+        self.saps = [s for s in self.saps if s.svc_id != svc_id]
+        self.bindings = [b for b in self.bindings if b.svc_id != svc_id]
+        self.static_routes = [s for s in self.static_routes if s.svc_id != svc_id]
+        self.bgp_peers = [p for p in self.bgp_peers if p.svc_id != svc_id]
+        self.route_targets = [r for r in self.route_targets if r.svc_id != svc_id]
+        self.route_next_hops = [h for h in self.route_next_hops if h.svc_id != svc_id]
+        self.macs = [m for m in self.macs if m.svc_id != svc_id]
+        self.bgp_rib = [p for p in self.bgp_rib if p.svc_id != svc_id]
+        self.bgp_rib_info = [i for i in self.bgp_rib_info if i.svc_id != svc_id]
+
     def apply_mpls_inventory(
         self,
         lsps: list[Lsp],

@@ -16,7 +16,7 @@ Si algún HTML/PDF de esa lista no es accesible desde acá, pegarlo en el chat.
 | Service Management Guide | 3HE-20028-AAAC-TQZZA | Customer / Epipe=E-Line, VPLS=E-LAN, VPRN=L3 VPN |
 | Catálogo REST vivo | `nsp-catalog.json` | `samo_*`, ServiceSupervision, FaultManagement |
 
-## Modelo de navegación (solo lectura)
+## Modelo de navegación
 
 1. `subscr.Subscriber` — DN `subscriber:<id>`
 2. Servicios del cliente: `vprn.Vprn` / `vpls.Vpls` / `epipe.Epipe` filtrados por `subscriberPointer`
