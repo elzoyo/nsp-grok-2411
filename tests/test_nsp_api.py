@@ -1,6 +1,8 @@
 import pytest
 
 from nsp_grok.nsp_api import (
+    _cards_from_inventory,
+    _ne_from_row,
     NspApiError,
     build_cpaa_record_xml,
     raise_if_xml_fault,
@@ -662,3 +664,85 @@ def test_raise_if_xml_fault():
         raise_if_xml_fault(
             '<?xml version="1.0"?><r><XMLException><description>denied</description></XMLException></r>'
         )
+
+
+def test_find_body_network_element_header():
+    body = build_find_body(
+        "netw.NetworkElement",
+        [
+            "objectFullName",
+            "displayedName",
+            "siteId",
+            "siteName",
+            "version",
+            "chassisType",
+            "administrativeState",
+            "operationalState",
+            "macAddress",
+        ],
+    )
+    assert body["find"]["fullClassName"] == "netw.NetworkElement"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "filter" not in body["find"]
+
+
+def test_find_body_physical_port_scoped_to_ne():
+    body = build_find_body(
+        "equipment.PhysicalPort",
+        ["objectFullName", "displayedName", "mode"],
+        {"wildcard": {"name": "objectFullName", "value": "network:10.10.1.1:%"}},
+    )
+    assert body["find"]["fullClassName"] == "equipment.PhysicalPort"
+    assert body["find"]["filter"]["wildcard"]["value"] == "network:10.10.1.1:%"
+    assert "*" not in body["find"]["filter"]["wildcard"]["value"]
+
+
+def test_ne_from_row_uses_site_id_and_name():
+    ne = _ne_from_row(
+        {
+            "objectFullName": "network:10.251.121.250",
+            "displayedName": "7705-OPE",
+            "siteId": "10.251.121.250",
+            "siteName": "UTE",
+            "chassisType": "7705 SAR",
+            "version": "24.10",
+            "administrativeState": "up",
+            "operationalState": "up",
+        }
+    )
+    assert ne is not None
+    assert ne.name == "7705-OPE"
+    assert ne.system_ip == "10.251.121.250"
+    assert ne.group == "UTE"
+
+
+def test_cards_group_ports_by_card_slot():
+    cards = _cards_from_inventory(
+        [
+            {
+                "objectFullName": "network:10.1.1.1:shelf-1:cardSlot-1:card:port-1",
+                "displayedName": "Port 1/1/1",
+                "mode": "access",
+                "operationalState": "up",
+                "administrativeState": "up",
+            },
+            {
+                "objectFullName": "network:10.1.1.1:shelf-1:cardSlot-2:card:port-1",
+                "displayedName": "Port 1/2/1",
+                "mode": "network",
+                "operationalState": "up",
+                "administrativeState": "up",
+            },
+        ],
+        [
+            {
+                "objectFullName": "network:10.1.1.1:shelf-1:cardSlot-1:card",
+                "specificType": "imm-2x10g",
+            }
+        ],
+    )
+    assert {c.slot for c in cards} == {"1", "2"}
+    c1 = next(c for c in cards if c.slot == "1")
+    assert c1.card_type == "imm-2x10g"
+    assert c1.ports[0].name == "1/1/1"
+    assert c1.ports[0].mode == "access"

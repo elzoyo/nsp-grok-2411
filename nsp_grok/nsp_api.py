@@ -18,8 +18,11 @@ from nsp_grok.models import (
     BgpPeer,
     BgpRibInfo,
     BgpRibPrefix,
+    Card,
     Cpaa,
     Customer,
+    NetworkElement,
+    Port,
     TopologyAs,
     Lsp,
     MacEntry,
@@ -802,6 +805,70 @@ class NspClient:
         )
         return [d for row in rows if (d := _topology_as_from_row(row, "bgp"))]
 
+    def load_network_elements(self) -> dict[str, NetworkElement]:
+        """netw.NetworkElement — inventory list, children empty, no port dump."""
+        rows = self._try_find(
+            ["netw.NetworkElement"],
+            [
+                "objectFullName",
+                "displayedName",
+                "siteId",
+                "siteName",
+                "version",
+                "chassisType",
+                "administrativeState",
+                "operationalState",
+                "macAddress",
+            ],
+            None,
+        )
+        out: dict[str, NetworkElement] = {}
+        for row in rows:
+            ne = _ne_from_row(row)
+            if ne:
+                out[ne.name] = ne
+        return out
+
+    def load_ne_hardware(self, ne: NetworkElement) -> list[Card]:
+        """equipment.PhysicalPort for one NE: wildcard network:<siteId>:%  (XML API inventory)."""
+        if not ne.system_ip:
+            return []
+        port_rows = self._try_find(
+            ["equipment.PhysicalPort"],
+            [
+                "objectFullName",
+                "displayedName",
+                "administrativeState",
+                "operationalState",
+                "mode",
+                "encapType",
+                "actualSpeed",
+            ],
+            {
+                "wildcard": {
+                    "name": "objectFullName",
+                    "value": f"network:{ne.system_ip}:%",
+                }
+            },
+        )
+        card_rows = self._try_find(
+            ["equipment.Card"],
+            [
+                "objectFullName",
+                "displayedName",
+                "specificType",
+                "administrativeState",
+                "operationalState",
+            ],
+            {
+                "wildcard": {
+                    "name": "objectFullName",
+                    "value": f"network:{ne.system_ip}:%",
+                }
+            },
+        )
+        return _cards_from_inventory(port_rows, card_rows)
+
     def load_bgp_rib_info(
         self, svc: Service, route_targets: list[RouteTarget]
     ) -> list[BgpRibInfo]:
@@ -1231,6 +1298,89 @@ def _bits(value: Any) -> str:
         if bit:
             return str(bit)
     return str(value or "")
+
+
+def _ne_from_row(row: dict[str, Any]) -> NetworkElement | None:
+    fdn = str(row.get("objectFullName") or "")
+    site_id = str(row.get("siteId") or "")
+    if not site_id and fdn.startswith("network:"):
+        site_id = fdn.split(":", 1)[1].split(":", 1)[0]
+    name = str(row.get("displayedName") or site_id or fdn)
+    if not name:
+        return None
+    site = str(row.get("siteName") or row.get("site") or "")
+    return NetworkElement(
+        name=name,
+        system_ip=site_id,
+        ne_type=str(row.get("chassisType") or row.get("neType") or ""),
+        version=str(row.get("version") or row.get("softwareVersion") or ""),
+        site=site,
+        group=site or "LIVE",
+        admin=_state(row.get("administrativeState")),
+        oper=_state(row.get("operationalState")),
+        chassis_mac=str(row.get("macAddress") or row.get("chassisMac") or ""),
+    )
+
+
+def _port_name_from_inventory(row: dict[str, Any]) -> str:
+    displayed = str(row.get("displayedName") or "")
+    for tok in displayed.replace("Port", " ").split():
+        if "/" in tok:
+            return tok
+    fdn = str(row.get("objectFullName") or "")
+    return fdn.rsplit(":", 1)[-1].replace("port-", "") if fdn else displayed or "?"
+
+
+def _card_slot_from_fdn(fdn: str) -> str:
+    for part in fdn.split(":"):
+        if part.startswith("cardSlot-"):
+            return part.replace("cardSlot-", "")
+    return "0"
+
+
+def _cards_from_inventory(port_rows: list[dict[str, Any]], card_rows: list[dict[str, Any]]) -> list[Card]:
+    types: dict[str, str] = {}
+    for row in card_rows:
+        fdn = str(row.get("objectFullName") or "")
+        slot = _card_slot_from_fdn(fdn)
+        types[slot] = str(row.get("specificType") or row.get("displayedName") or "card")
+    by_slot: dict[str, list[Port]] = {}
+    for row in port_rows:
+        fdn = str(row.get("objectFullName") or "")
+        slot = _card_slot_from_fdn(fdn)
+        mode = str(row.get("mode") or "access").lower()
+        if "network" in mode:
+            mode = "network"
+        else:
+            mode = "access"
+        encap = str(row.get("encapType") or "")
+        by_slot.setdefault(slot, []).append(
+            Port(
+                name=_port_name_from_inventory(row),
+                mode=mode,
+                encap=encap or ("null" if mode == "network" else "dot1q"),
+                admin=_state(row.get("administrativeState")),  # type: ignore[arg-type]
+                oper=_state(row.get("operationalState")),  # type: ignore[arg-type]
+                speed=str(row.get("actualSpeed") or row.get("speed") or ""),
+                description=str(row.get("displayedName") or ""),
+            )
+        )
+    cards: list[Card] = []
+    for slot in sorted(by_slot, key=lambda s: (len(s), s)):
+        ports = by_slot[slot]
+        down = any(p.oper == "down" for p in ports)
+        ctype = types.get(slot, "line-card")
+        cards.append(
+            Card(
+                slot=slot,
+                card_type=ctype,
+                equipped=ctype,
+                admin="up",
+                oper="degraded" if down else "up",
+                ports=ports,
+            )
+        )
+    return cards
 
 
 def _topology_as_from_row(row: dict[str, Any], kind: str) -> TopologyAs | None:

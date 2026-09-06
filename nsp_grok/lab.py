@@ -933,3 +933,12 @@ class Store:
 
     def apply_bgp_ases(self, ases: list[TopologyAs]) -> None:
         self.bgp_ases = list(ases)
+
+    def apply_nes(self, nes: dict[str, NetworkElement]) -> None:
+        if nes:
+            self.nes = nes
+
+    def apply_ne_hardware(self, name: str, cards: list[Card]) -> None:
+        ne = self.nes.get(name)
+        if ne is not None:
+            ne.cards = cards

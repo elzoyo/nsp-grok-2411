@@ -46,6 +46,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 - Live SDP binding (`vprn/vpls/epipe.SdpBinding`) al entrar al servicio.
 - Live `svt.Tunnel` (por SDP id), `mpls.DynamicLsp`, `fm.AlarmObject` (FDN del servicio) y MAC VPLS.
 - Live CPAM: queries 10–14 (Cpaa, AS IGP, AS BGP, RIB/RT). Stats on-demand (`timeCaptured`).
+- Live equipos: `netw.NetworkElement` al entrar a `equipment`; puertos `equipment.PhysicalPort` por `network:<siteId>:%`.
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -68,7 +69,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto:** primera instancia no crea servicios. MPLS create/shutdown sigue en lab. Query 17 es comando explícito `cpaa record bgp [fdn]` (write, live); no corre al login.
+**Producto:** primera instancia no crea servicios. MPLS create/shutdown sigue en lab. Query 17 es `cpaa record bgp [fdn]` (write, live). Equipos live al navegar `equipment`.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 

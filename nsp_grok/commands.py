@@ -177,6 +177,15 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
         return None
     path = ctx.cwd
     try:
+        if path[:1] == ["equipment"]:
+            ctx.store.apply_nes(ctx.client.load_network_elements())
+            if len(path) >= 3:
+                ne_name = path[2]
+                ne = ctx.store.nes.get(ne_name)
+                if ne is not None:
+                    ctx.store.apply_ne_hardware(ne.name, ctx.client.load_ne_hardware(ne))
+            ctx.rebuild()
+            return None
         if path[:1] != ["customers"]:
             return None
         ctx.store.apply_cpaa(ctx.client.load_cpaa())
@@ -419,6 +428,9 @@ def _find(ctx: Ctx, args: list[str]) -> Outcome:
 
 
 def _ne(ctx: Ctx, args: list[str]) -> Outcome:
+    if ctx.live and ctx.client is not None:
+        ctx.store.apply_nes(ctx.client.load_network_elements())
+        ctx.rebuild()
     visible = ctx.store.visible_nes(ctx.user)
     if not args:
         return Outcome(renderable=render.ne_table(visible.values()))
@@ -428,6 +440,9 @@ def _ne(ctx: Ctx, args: list[str]) -> Outcome:
     )
     if ne is None:
         return Outcome(error=f"NE fuera del span of control: {name}")
+    if ctx.live and ctx.client is not None:
+        ctx.store.apply_ne_hardware(ne.name, ctx.client.load_ne_hardware(ne))
+        ne = ctx.store.nes.get(ne.name) or ne
     return Outcome(renderable=render.show_ne(ne))
 
 
