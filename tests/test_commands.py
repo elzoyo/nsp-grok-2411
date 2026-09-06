@@ -426,3 +426,116 @@ def test_live_service_create_posts_to_nsp():
         ("epipe", 33, 310, "eline-x", ("10.10.1.1", "10.10.3.1"))
     ]
     assert ctx.store.services[310].svc_type == "epipe"
+
+
+def test_sap_create_requires_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "sap create service=100 site=PE-BAIRES-01 port=1/1/11 vlan=101 ip=10.1.12.9/30",
+    )
+    assert "confirmación" in out.error
+
+
+def test_sap_create_lab():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "sap create service=100 site=PE-BAIRES-01 port=1/1/11 vlan=101 ip=10.1.12.9/30 confirm=yes",
+    )
+    assert out.error == ""
+    sap = next(
+        s for s in ctx.store.saps if s.svc_id == 100 and s.name == "1/1/11:101"
+    )
+    assert sap.site_id == "10.10.1.1"
+    assert sap.port == "1/1/11"
+    assert sap.outer_tag == 101
+    assert sap.primary_ipv4 == "10.1.12.9/30"
+    assert sap.layer == "l3"
+
+
+def test_sap_create_vpls_from_cwd():
+    ctx = _admin_ctx()
+    dispatch(ctx, "customers 20 vpls 200")
+    out = dispatch(
+        ctx,
+        "sap create site=PE-BAIRES-02 port=1/1/3 vlan=201 confirm=yes",
+    )
+    assert out.error == ""
+    sap = next(s for s in ctx.store.saps if s.svc_id == 200 and s.name == "1/1/3:201")
+    assert sap.layer == "l2"
+    assert sap.site_id == "10.10.1.2"
+
+
+def test_sap_create_vprn_requires_ip():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "sap create service=100 site=PE-BAIRES-01 port=1/1/11 vlan=101 confirm=yes",
+    )
+    assert "ip=" in out.error
+
+
+def test_sap_shutdown_and_delete():
+    ctx = _admin_ctx()
+    dispatch(
+        ctx,
+        "sap create service=100 site=PE-BAIRES-01 port=1/1/11 vlan=101 ip=10.1.12.9/30 confirm=yes",
+    )
+    out = dispatch(ctx, "sap shutdown 1/1/11:101")
+    assert "confirmación" in out.error
+    out = dispatch(ctx, "sap shutdown 1/1/11:101 confirm=yes")
+    assert out.error == ""
+    sap = next(s for s in ctx.store.saps if s.name == "1/1/11:101" and s.svc_id == 100)
+    assert sap.admin == "down"
+    out = dispatch(ctx, "sap delete 1/1/11:101 confirm=yes")
+    assert out.error == ""
+    assert not any(s.name == "1/1/11:101" for s in ctx.store.saps)
+
+
+def test_viewer_cannot_create_sap():
+    ctx = _viewer_ctx()
+    out = dispatch(
+        ctx,
+        "sap create service=100 site=PE-BAIRES-01 port=1/1/11 vlan=101 ip=10.1.1.1/30 confirm=yes",
+    )
+    assert "permiso denegado" in out.error
+
+
+class _LiveSapClient:
+    def __init__(self) -> None:
+        self.sites: list[tuple] = []
+        self.saps: list[tuple] = []
+
+    def load_sites(self, svc):
+        return []
+
+    def load_saps(self, svc, sites=None):
+        return []
+
+    def create_site(self, svc_fdn, svc_type, site_ip):
+        self.sites.append((svc_fdn, svc_type, site_ip))
+        return f"{svc_fdn}:{site_ip}"
+
+    def create_sap(self, svc_type, site_fdn, port_pointer, outer=0, inner=0, ip_cidr="", name=""):
+        self.saps.append((svc_type, site_fdn, port_pointer, outer, ip_cidr, name))
+
+    def find_port_fdn(self, site_ip, port):
+        return f"network:{site_ip}:shelf-1:cardSlot-1:card:port-{port.rsplit('/', 1)[-1]}"
+
+
+def test_live_sap_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveSapClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "sap create service=300 site=PE-BAIRES-01 port=1/1/4 vlan=301 confirm=yes",
+    )
+    assert out.error == ""
+    assert client.saps
+    assert client.saps[0][0] == "epipe"
+    assert client.saps[0][1].endswith(":10.10.1.1")
+    assert "port-4" in client.saps[0][2]
+    assert client.saps[0][3] == 301

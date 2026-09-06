@@ -14,7 +14,7 @@ from rich.text import Text
 from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
-from nsp_grok.models import Lsp, Service, ServiceSite, Task, User
+from nsp_grok.models import AccessInterface, Lsp, Service, ServiceSite, Task, User
 from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
@@ -27,6 +27,7 @@ SLASH = {
     "customers": "lista de clientes (subscr.Subscriber)",
     "customer": "muestra un cliente",
     "services": "VPRN / VPLS / Epipe  (create|shutdown|delete)",
+    "sap": "SAP L3/L2 (create|shutdown|delete)",
     "status": "resumen de sesión",
     "whoami": "usuario, rol, span of control",
     "ne": "elementos de red",
@@ -105,6 +106,8 @@ def _handlers():
         "service": _service,
         "services": _service,
         "create": _create_cmd,
+        "sap": _sap_cmd,
+        "saps": _sap_cmd,
         "stats": _stats,
         "resync": _resync,
         "topology": lambda c, a: Outcome(renderable=render.topology_ascii()),
@@ -846,6 +849,12 @@ def _service(ctx: Ctx, args: list[str]) -> Outcome:
 
 
 def _create_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    rest, flag = _split_confirm(args)
+    extra = [f"confirm={flag}"] if flag is not None else []
+    if rest and rest[0].lower() == "sap":
+        return _sap_create(ctx, rest[1:] + extra)
+    if ctx.cwd and ctx.cwd[-1] == "saps":
+        return _sap_create(ctx, args)
     if ctx.cwd[:1] == ["mpls"]:
         return _lsp_create(ctx, args)
     return _service_create(ctx, args)
@@ -1081,6 +1090,318 @@ def _service_delete(ctx: Ctx, args: list[str]) -> Outcome:
         ctx.rebuild()
     _task(ctx, f"delete service {sid}", svc.fdn)
     return Outcome(renderable=Text(f"eliminado {svc.svc_type} {sid}", style="green"))
+
+
+def _cwd_service(ctx: Ctx) -> Service | None:
+    if len(ctx.cwd) >= 4 and ctx.cwd[0] == "customers" and ctx.cwd[3].isdigit():
+        return ctx.store.services.get(int(ctx.cwd[3]))
+    return None
+
+
+def _cwd_site_token(ctx: Ctx) -> str:
+    if "sites" in ctx.cwd:
+        idx = ctx.cwd.index("sites")
+        if idx + 1 < len(ctx.cwd):
+            return ctx.cwd[idx + 1]
+    return ""
+
+
+def _reload_service_access(ctx: Ctx, svc: Service) -> Outcome | None:
+    if not ctx.live or ctx.client is None:
+        return None
+    try:
+        sites = ctx.client.load_sites(svc)
+        saps = ctx.client.load_saps(svc, sites)
+        ctx.store.apply_sites_saps(svc.svc_id, sites, saps)
+        ctx.rebuild()
+    except UserCancelled:
+        raise
+    except KeyboardInterrupt as exc:
+        raise UserCancelled("Cancelado con Ctrl-C.") from exc
+    except NspApiError as exc:
+        return Outcome(error=str(exc), quit=True)
+    except Exception as exc:
+        return Outcome(error=_unexpected(exc), quit=True)
+    return None
+
+
+def _find_sap(ctx: Ctx, key: str, svc: Service | None = None) -> AccessInterface | None:
+    if svc is not None:
+        saps = ctx.store.saps_of(svc.svc_id, ctx.user)
+    else:
+        saps = [
+            sap
+            for sid in ctx.store.visible_services(ctx.user)
+            for sap in ctx.store.saps_of(sid, ctx.user)
+        ]
+    for sap in saps:
+        if sap.name == key or sap.fdn == key:
+            return sap
+        if sap.outer_tag and f"{sap.port}:{sap.outer_tag}" == key:
+            return sap
+        if sap.port == key:
+            return sap
+    return None
+
+
+def _port_pointer_of(ctx: Ctx, ne_name: str, site_ip: str, port: str) -> str:
+    if port.startswith("network:"):
+        return port
+    ne = ctx.store.nes.get(ne_name)
+    if ne is not None:
+        if ctx.live and ctx.client is not None and not ne.cards:
+            ctx.store.apply_ne_hardware(ne.name, ctx.client.load_ne_hardware(ne))
+            ne = ctx.store.nes.get(ne_name) or ne
+        for card in ne.cards:
+            for p in card.ports:
+                if p.name == port and p.fdn:
+                    return p.fdn
+    if ctx.live and ctx.client is not None:
+        return ctx.client.find_port_fdn(site_ip, port)
+    return ""
+
+
+def _sap_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    if not args or args[0].lower() in ("list", "ls"):
+        svc = _cwd_service(ctx)
+        if svc is None:
+            saps = [
+                sap
+                for sid in ctx.store.visible_services(ctx.user)
+                for sap in ctx.store.saps_of(sid, ctx.user)
+            ]
+        else:
+            saps = ctx.store.saps_of(svc.svc_id, ctx.user)
+        from rich.table import Table
+
+        t = Table(title="SAPs", border_style="grey37")
+        t.add_column("servicio")
+        t.add_column("site")
+        t.add_column("SAP")
+        t.add_column("puerto")
+        t.add_column("vlan")
+        t.add_column("ip")
+        t.add_column("oper")
+        for sap in saps:
+            t.add_row(
+                str(sap.svc_id),
+                sap.site_id,
+                sap.name,
+                sap.port,
+                str(sap.outer_tag or "—"),
+                sap.primary_ipv4 or "—",
+                render.state(sap.oper),
+            )
+        return Outcome(renderable=t)
+    action = args[0].lower()
+    if action == "create":
+        return _sap_create(ctx, args[1:])
+    if action in ("shutdown", "shut") and len(args) >= 2:
+        return _sap_admin(ctx, args[1:], "down")
+    if action in ("turnup", "no-shutdown") and len(args) >= 2:
+        return _sap_admin(ctx, args[1:], "up")
+    if action == "delete" and len(args) >= 2:
+        return _sap_delete(ctx, args[1:])
+    sap = _find_sap(ctx, args[0], _cwd_service(ctx))
+    if sap is None:
+        return Outcome(error=f"SAP desconocido: {args[0]}")
+    return Outcome(renderable=render.show_sap(sap))
+
+
+def _sap_create(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
+    svc_key = kv.get("service") or kv.get("svc") or kv.get("id") or ""
+    svc = _find_service(ctx, svc_key) if svc_key else _cwd_service(ctx)
+    if svc is None:
+        return Outcome(
+            error=(
+                "uso: sap create service=<id> site=<NE|IP> port=<puerto|FDN> "
+                "vlan=<n> [ip=a.b.c.d/p] [inner=0] [confirm=yes]"
+            )
+        )
+    site_tok = kv.get("site") or kv.get("ne") or _cwd_site_token(ctx)
+    if not site_tok:
+        return Outcome(error="sap create: site=<NE|IP> (o contexto sites/<siteId>)")
+    ep = _ne_endpoint(ctx, site_tok)
+    if ep is None:
+        return Outcome(error=f"NE fuera del span of control: {site_tok}")
+    ne_name, site_ip = ep
+    if not site_ip:
+        return Outcome(error=f"el NE {ne_name} no tiene system IP (siteId)")
+    port = kv.get("port") or kv.get("portpointer") or kv.get("sap") or ""
+    if not port:
+        return Outcome(error="sap create: port=<1/1/10 o FDN network:...>")
+    vlan_raw = kv.get("vlan") or kv.get("outer") or kv.get("tag") or "0"
+    if not vlan_raw.isdigit():
+        return Outcome(error="sap create: vlan=<n> (outerEncapValue)")
+    outer = int(vlan_raw)
+    inner_raw = kv.get("inner") or "0"
+    inner = int(inner_raw) if inner_raw.isdigit() else 0
+    ip_cidr = kv.get("ip") or kv.get("address") or ""
+    if svc.svc_type == "vprn" and not ip_cidr:
+        return Outcome(error="sap create: VPRN requiere ip=a.b.c.d/prefijo")
+    if svc.svc_type != "vprn":
+        ip_cidr = ""
+    name = kv.get("name") or (f"{port}:{outer}" if ":" not in port else port)
+    if port.startswith("network:"):
+        name = kv.get("name") or (f"{port.rsplit(':', 1)[-1].replace('port-', '')}:{outer}")
+    existing = ctx.store.sites_of(svc.svc_id, ctx.user)
+    site = next((s for s in existing if s.site_id == site_ip or s.ne == ne_name), None)
+    new_site = site is None
+    pointer = _port_pointer_of(ctx, ne_name, site_ip, port)
+    if ctx.live and ctx.client is not None and not pointer:
+        return Outcome(
+            error=(
+                f"no se resolvió portPointer para {port} en {ne_name} "
+                f"(pasá FDN network:{site_ip}:... o cargá equipment)"
+            )
+        )
+    if not pointer:
+        pointer = port
+    site_note = " (crea el site)" if new_site else ""
+    denied = _require_confirm(
+        ctx,
+        (
+            f"Crear SAP {name} en {svc.svc_type.upper()} {svc.svc_id} "
+            f"site={ne_name} ({site_ip}) port={port} vlan={outer} "
+            f"{'ip=' + ip_cidr + ' ' if ip_cidr else ''}"
+            f"{site_note} en {_backend_label(ctx)}"
+        ),
+        flag,
+    )
+    if denied is not None:
+        return denied
+    site_fdn = f"{svc.fdn}:{site_ip}"
+    if ctx.live and ctx.client is not None:
+        if new_site:
+            ctx.client.create_site(svc.fdn, svc.svc_type, site_ip)
+        ctx.client.create_sap(
+            svc.svc_type, site_fdn, pointer, outer, inner, ip_cidr, name
+        )
+        err = _reload_service_access(ctx, svc)
+        if err is not None:
+            return err
+        created = _find_sap(ctx, name, svc)
+        if created is None:
+            created = AccessInterface(
+                svc_id=svc.svc_id,
+                site_id=site_ip,
+                name=name,
+                port=_port_short(port),
+                layer="l3" if svc.svc_type == "vprn" else "l2",
+                encap="dot1q" if outer else "null",
+                outer_tag=outer,
+                primary_ipv4=ip_cidr,
+                mgr_id=svc.mgr_id,
+                port_pointer=pointer,
+            )
+            if new_site:
+                ctx.store.add_site(ServiceSite(svc_id=svc.svc_id, site_id=site_ip, ne=ne_name, mgr_id=svc.mgr_id))
+            ctx.store.add_sap(created)
+            ctx.rebuild()
+        _task(ctx, f"create SAP {name}", created.fdn)
+        return Outcome(
+            renderable=Group(
+                Text("creado en NSP (configureChildInstance, no automático)", style="green"),
+                render.show_sap(created),
+            )
+        )
+    if new_site:
+        ctx.store.add_site(
+            ServiceSite(svc_id=svc.svc_id, site_id=site_ip, ne=ne_name, mgr_id=svc.mgr_id)
+        )
+    created = AccessInterface(
+        svc_id=svc.svc_id,
+        site_id=site_ip,
+        name=name,
+        port=_port_short(port),
+        layer="l3" if svc.svc_type == "vprn" else "l2",
+        encap="dot1q" if outer else "null",
+        outer_tag=outer,
+        primary_ipv4=ip_cidr,
+        mgr_id=svc.mgr_id,
+        port_pointer=pointer if pointer.startswith("network:") else "",
+    )
+    ctx.store.add_sap(created)
+    ctx.rebuild()
+    _task(ctx, f"create SAP {name}", created.fdn)
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_sap(created)))
+
+
+def _port_short(port: str) -> str:
+    if port.startswith("network:"):
+        tail = port.rsplit(":", 1)[-1].replace("port-", "")
+        return tail
+    return port.split(":", 1)[0] if port.count(":") == 1 and "/" in port else port
+
+
+def _sap_admin(ctx: Ctx, args: list[str], admin: str) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: sap shutdown|turnup <nombre> [confirm=yes]")
+    sap = _find_sap(ctx, rest[0], _cwd_service(ctx))
+    if sap is None:
+        return Outcome(error=f"SAP desconocido: {rest[0]}")
+    svc = ctx.store.services.get(sap.svc_id)
+    if admin == "down":
+        denied = _require_confirm(
+            ctx,
+            f"Apagar (shutdown) SAP {sap.name} servicio {sap.svc_id} en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
+    if ctx.live and ctx.client is not None:
+        if svc is None:
+            return Outcome(error=f"servicio desconocido: {sap.svc_id}")
+        ctx.client.configure_sap_admin(sap.fdn, svc.svc_type, admin)
+        err = _reload_service_access(ctx, svc)
+        if err is not None:
+            return err
+        sap = _find_sap(ctx, sap.name, svc) or sap
+    sap.admin = admin  # type: ignore[assignment]
+    sap.oper = admin  # type: ignore[assignment]
+    verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
+    _task(ctx, f"{verb} SAP {sap.name}", sap.fdn)
+    return Outcome(renderable=Text(f"{sap.name} {verb}", style="green"))
+
+
+def _sap_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: sap delete <nombre> [confirm=yes]")
+    sap = _find_sap(ctx, rest[0], _cwd_service(ctx))
+    if sap is None:
+        return Outcome(error=f"SAP desconocido: {rest[0]}")
+    svc = ctx.store.services.get(sap.svc_id)
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar SAP {sap.name} servicio {sap.svc_id} FDN {sap.fdn} en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.delete_sap(sap.fdn)
+        if svc is not None:
+            err = _reload_service_access(ctx, svc)
+            if err is not None:
+                return err
+        if _find_sap(ctx, sap.name, svc):
+            ctx.store.remove_sap(sap)
+            ctx.rebuild()
+    else:
+        ctx.store.remove_sap(sap)
+        ctx.rebuild()
+    _task(ctx, f"delete SAP {sap.name}", sap.fdn)
+    return Outcome(renderable=Text(f"eliminado SAP {sap.name}", style="green"))
 
 
 def _alarm(ctx: Ctx, args: list[str]) -> Outcome:

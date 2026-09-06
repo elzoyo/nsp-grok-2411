@@ -256,6 +256,109 @@ def build_service_create_xml(
     )
 
 
+SAP_XML_CLASS = {
+    "vprn": "vprn.L3AccessInterface",
+    "vpls": "vpls.L2AccessInterface",
+    "epipe": "vll.L2AccessInterface",
+}
+
+
+def _sap_xml_class(svc_type: str) -> str:
+    kind = (svc_type or "").lower()
+    if kind not in SAP_XML_CLASS:
+        raise NspApiError("tipo de servicio: vprn | vpls | epipe")
+    return SAP_XML_CLASS[kind]
+
+
+def build_site_create_xml(svc_fdn: str, svc_type: str, site_ip: str) -> str:
+    """configureChildInstance of *.Site under the service FDN. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = SVC_SITE_XML_CLASS[(svc_type or "").lower()]
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(svc_fdn)}</distinguishedName>"
+        "<childConfigInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<siteId>{escape(site_ip)}</siteId>"
+        f"</{cls}>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_sap_create_xml(
+    svc_type: str,
+    site_fdn: str,
+    port_pointer: str,
+    outer: int = 0,
+    inner: int = 0,
+    ip_cidr: str = "",
+    name: str = "",
+) -> str:
+    """configureChildInstance L3/L2AccessInterface under the site FDN. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = _sap_xml_class(svc_type)
+    name_xml = f"<displayedName>{escape(name)}</displayedName>" if name else ""
+    children = ""
+    if (svc_type or "").lower() == "vprn" and ip_cidr:
+        addr, sep, plen = ip_cidr.partition("/")
+        prefix = escape(plen or "30")
+        children = (
+            "<children-Set>"
+            "<rtr.VirtualRouterIpAddress>"
+            "<actionMask><bit>create</bit></actionMask>"
+            f"<ipAddress>{escape(addr)}</ipAddress>"
+            f"<prefixLength>{prefix}</prefixLength>"
+            "</rtr.VirtualRouterIpAddress>"
+            "</children-Set>"
+        )
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(site_fdn)}</distinguishedName>"
+        "<childConfigInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<portPointer>{escape(port_pointer)}</portPointer>"
+        f"<outerEncapValue>{int(outer)}</outerEncapValue>"
+        f"<innerEncapValue>{int(inner)}</innerEncapValue>"
+        f"{name_xml}{children}"
+        f"</{cls}>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_sap_admin_xml(fdn: str, svc_type: str, admin: str) -> str:
+    """configureInstance administrativeState on a SAP. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = _sap_xml_class(svc_type)
+    state = "down" if admin == "down" else "up"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<administrativeState>{state}</administrativeState>"
+        f"</{cls}>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
+    )
+
+
 def build_service_admin_xml(fdn: str, svc_type: str, admin: str) -> str:
     """configureInstance administrativeState on a service. Explicit write."""
     from xml.sax.saxutils import escape
@@ -1007,6 +1110,75 @@ class NspClient:
             raise NspApiError("hace falta el FDN del servicio para borrar")
         self._post_xml(build_delete_instance_xml(fdn), "service delete")
         return fdn
+
+    def create_site(self, svc_fdn: str, svc_type: str, site_ip: str) -> str:
+        """Explicit write: configureChildInstance of *.Site. Never auto."""
+        if not svc_fdn or not site_ip:
+            raise NspApiError("sap create: hace falta FDN del servicio y siteId")
+        self._post_xml(build_site_create_xml(svc_fdn, svc_type, site_ip), "site create")
+        return f"{svc_fdn}:{site_ip}"
+
+    def create_sap(
+        self,
+        svc_type: str,
+        site_fdn: str,
+        port_pointer: str,
+        outer: int = 0,
+        inner: int = 0,
+        ip_cidr: str = "",
+        name: str = "",
+    ) -> None:
+        """Explicit write: configureChildInstance L3/L2AccessInterface. Never auto."""
+        if not site_fdn:
+            raise NspApiError("sap create: hace falta FDN del site (svc-mgr:service-<id>:<siteId>)")
+        if not port_pointer:
+            raise NspApiError("sap create: hace falta portPointer")
+        self._post_xml(
+            build_sap_create_xml(
+                svc_type, site_fdn, port_pointer, outer, inner, ip_cidr, name
+            ),
+            "sap create",
+        )
+
+    def configure_sap_admin(self, fdn: str, svc_type: str, admin: str) -> str:
+        """Explicit write: configureInstance administrativeState on a SAP."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del SAP")
+        self._post_xml(build_sap_admin_xml(fdn, svc_type, admin), "sap admin")
+        return fdn
+
+    def delete_sap(self, fdn: str) -> str:
+        """Explicit write: deleteInstance on a SAP. Never auto."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del SAP para borrar")
+        self._post_xml(build_delete_instance_xml(fdn), "sap delete")
+        return fdn
+
+    def find_port_fdn(self, site_ip: str, port: str) -> str:
+        """equipment.PhysicalPort of one NE matching port name. Never unfiltered."""
+        if port.startswith("network:"):
+            return port
+        if not site_ip:
+            return ""
+        rows = self._optional_find(
+            ["equipment.PhysicalPort"],
+            ["objectFullName", "displayedName"],
+            {
+                "wildcard": {
+                    "name": "objectFullName",
+                    "value": f"network:{site_ip}:%",
+                }
+            },
+        )
+        for row in rows:
+            if _port_name_from_inventory(row) == port:
+                return str(row.get("objectFullName") or "")
+        needle = port.lower()
+        for row in rows:
+            displayed = str(row.get("displayedName") or "").lower()
+            if needle in displayed:
+                return str(row.get("objectFullName") or "")
+        return ""
 
     def load_igp_domains(self) -> list[TopologyAs]:
         """Query 11: topology.AutonomousSystem — cabecera IGP, children empty (sin LSDB)."""
@@ -1803,6 +1975,7 @@ def _cards_from_inventory(port_rows: list[dict[str, Any]], card_rows: list[dict[
                 oper=_state(row.get("operationalState")),  # type: ignore[arg-type]
                 speed=str(row.get("actualSpeed") or row.get("speed") or ""),
                 description=str(row.get("displayedName") or ""),
+                fdn=fdn,
             )
         )
     cards: list[Card] = []
@@ -1948,6 +2121,7 @@ def _saps_from_rows(svc: Service, rows: list[dict[str, Any]]) -> list[AccessInte
                 oper=_state(row.get("operationalState")),
                 mgr_id=svc.mgr_id,
                 port_pointer=pointer,
+                object_fdn=fdn,
             )
         )
     return saps

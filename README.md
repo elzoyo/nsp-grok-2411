@@ -49,6 +49,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 - Live equipos: `netw.NetworkElement` al entrar a `equipment`; puertos `equipment.PhysicalPort` por `network:<siteId>:%`.
 - Live MPLS: LSPs por `sourceNodeId` del NE (`mpls.DynamicLsp` y hermanas), SDP `svt.Tunnel` e interfaces `mpls.Interface` con wildcard `network:<siteId>:%`. Create/shutdown/delete explícitos (configureChildInstance / configureInstance / deleteInstance); no automáticos.
 - Create de servicios VPRN/VPLS/Epipe (`svc-mgr` + `subscriberPointer`, sites opcionales). Toda escritura destructiva (create/shutdown/delete/alarm clear/query 17) pide confirmación.
+- Create de SAP: `vprn.L3AccessInterface` / `vpls.L2AccessInterface` / `vll.L2AccessInterface` bajo el site, con `portPointer`, VLAN e IP (VPRN). Si el site no existe, lo crea.
 - `id` (NFM-P, FDN) separado de `serviceId` (NE, prompt).
 - UI de ayuda / errores / contexto en español; comandos en inglés.
 - Lab local completo (customers, sites, SAP, SDP, LSP, alarmas, RT, estáticas, BGP, MAC).
@@ -71,7 +72,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto:** create de VPRN/VPLS/Epipe (`configureChildInstance` en `svc-mgr`) y MPLS, con confirmación. Shutdown/delete (servicio, LSP, alarm clear) y query 17 también piden confirmación. Equipos live al navegar `equipment`.
+**Producto:** create de VPRN/VPLS/Epipe y SAP (`configureChildInstance` en `svc-mgr` / site), y MPLS, con confirmación. Shutdown/delete (servicio, SAP, LSP, alarm clear) y query 17 también piden confirmación. Equipos live al navegar `equipment`.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 

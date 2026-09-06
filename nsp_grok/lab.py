@@ -948,6 +948,28 @@ class Store:
         if sites:
             self.sites = [s for s in self.sites if s.svc_id != svc.svc_id] + list(sites)
 
+    def add_site(self, site: ServiceSite) -> None:
+        self.sites = [
+            s for s in self.sites if not (s.svc_id == site.svc_id and s.site_id == site.site_id)
+        ] + [site]
+        svc = self.services.get(site.svc_id)
+        if svc is not None and site.ne and site.ne not in svc.sites:
+            svc.sites = list(svc.sites) + [site.ne]
+
+    def add_sap(self, sap: AccessInterface) -> None:
+        self.saps = [
+            s
+            for s in self.saps
+            if not (s.svc_id == sap.svc_id and s.site_id == sap.site_id and s.name == sap.name)
+        ] + [sap]
+
+    def remove_sap(self, sap: AccessInterface) -> None:
+        self.saps = [
+            s
+            for s in self.saps
+            if not (s.svc_id == sap.svc_id and s.site_id == sap.site_id and s.name == sap.name)
+        ]
+
     def remove_service(self, svc_id: int) -> None:
         self.services.pop(svc_id, None)
         self.sites = [s for s in self.sites if s.svc_id != svc_id]

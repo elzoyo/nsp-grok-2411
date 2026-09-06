@@ -52,6 +52,7 @@ class Port:
     speed: str
     description: str = ""
     lag: str = ""
+    fdn: str = ""
 
 
 @dataclass
@@ -213,6 +214,7 @@ class AccessInterface:
     oper: OperState = "up"
     mgr_id: int = 0
     port_pointer: str = ""  # NFM-P portPointer FDN; port is the last component
+    object_fdn: str = ""
 
     def __post_init__(self) -> None:
         if not self.mgr_id:
@@ -220,7 +222,9 @@ class AccessInterface:
 
     @property
     def fdn(self) -> str:
-        return f"svc-mgr:service-{self.mgr_id}:{self.site_id}:interface-{self.name}"
+        return self.object_fdn or (
+            f"svc-mgr:service-{self.mgr_id}:{self.site_id}:interface-{self.name}"
+        )
 
 
 @dataclass

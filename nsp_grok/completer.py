@@ -27,6 +27,8 @@ VERBS = [
     "service",
     "services",
     "create",
+    "sap",
+    "saps",
     "stats",
     "resync",
     "topology",
@@ -87,6 +89,26 @@ class NspCompleter(Completer):
                 token = str(sid)
                 if token.startswith(current) or svc.name.startswith(current):
                     yield Completion(token, start_position=-len(current), display_meta=svc.name)
+        elif verb in ("sap", "saps"):
+            if len(parts) == 1 or (len(parts) == 2 and not text.endswith(" ")):
+                for w in ("create", "shutdown", "turnup", "delete", "list"):
+                    if w.startswith(current):
+                        yield Completion(w, start_position=-len(current))
+            svc = None
+            if len(self.ctx.cwd) >= 4 and self.ctx.cwd[3].isdigit():
+                svc = self.ctx.store.services.get(int(self.ctx.cwd[3]))
+            saps = (
+                self.ctx.store.saps_of(svc.svc_id, self.ctx.user)
+                if svc
+                else [
+                    sap
+                    for sid in self.ctx.store.visible_services(self.ctx.user)
+                    for sap in self.ctx.store.saps_of(sid, self.ctx.user)
+                ]
+            )
+            for sap in saps:
+                if sap.name.startswith(current):
+                    yield Completion(sap.name, start_position=-len(current), display_meta=str(sap.svc_id))
         elif verb in ("ne", "resync"):
             for name in self.ctx.store.visible_nes(self.ctx.user):
                 if name.startswith(current):

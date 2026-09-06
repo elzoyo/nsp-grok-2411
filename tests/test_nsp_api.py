@@ -11,6 +11,9 @@ from nsp_grok.nsp_api import (
     build_lsp_delete_xml,
     build_service_admin_xml,
     build_service_create_xml,
+    build_sap_admin_xml,
+    build_sap_create_xml,
+    build_site_create_xml,
     build_delete_instance_xml,
     raise_if_xml_fault,
     _alarm_from_row,
@@ -268,6 +271,7 @@ def test_sap_uses_port_pointer():
     assert saps[0].primary_ipv4 == "12.5.196.1"
     assert saps[0].svc_id == 10
     assert saps[0].mgr_id == 1
+    assert saps[0].fdn == "svc-mgr:service-1:10.251.121.250:ip-if-4"
 
 
 def test_static_from_row_network_fdn():
@@ -753,6 +757,7 @@ def test_cards_group_ports_by_card_slot():
     assert c1.card_type == "imm-2x10g"
     assert c1.ports[0].name == "1/1/1"
     assert c1.ports[0].mode == "access"
+    assert c1.ports[0].fdn.endswith(":port-1")
 
 
 def test_find_body_dynamic_lsp_scoped_to_ne():
@@ -857,3 +862,43 @@ def test_service_create_xml_epipe_escapes_and_admin():
     assert "<vpls.Vpls>" in down
     assert "<administrativeState>down</administrativeState>" in down
     assert "generic.GenericObject.deleteInstance" in build_delete_instance_xml("svc-mgr:service-9")
+
+
+def test_sap_create_xml_vprn_with_ip():
+    xml = build_sap_create_xml(
+        "vprn",
+        "svc-mgr:service-1:10.10.1.1",
+        "network:10.10.1.1:shelf-1:cardSlot-1:card:port-10",
+        outer=100,
+        inner=0,
+        ip_cidr="10.1.12.1/30",
+        name="1/1/10:100",
+    )
+    assert "generic.GenericObject.configureChildInstance" in xml
+    assert "<distinguishedName>svc-mgr:service-1:10.10.1.1</distinguishedName>" in xml
+    assert "<vprn.L3AccessInterface>" in xml
+    assert "<portPointer>network:10.10.1.1:shelf-1:cardSlot-1:card:port-10</portPointer>" in xml
+    assert "<outerEncapValue>100</outerEncapValue>" in xml
+    assert "<innerEncapValue>0</innerEncapValue>" in xml
+    assert "<rtr.VirtualRouterIpAddress>" in xml
+    assert "<ipAddress>10.1.12.1</ipAddress>" in xml
+    assert "<prefixLength>30</prefixLength>" in xml
+
+
+def test_sap_create_xml_epipe_and_escape():
+    xml = build_sap_create_xml(
+        "epipe",
+        "svc-mgr:service-9:10.10.1.1",
+        "network:10.0.0.1:port&x",
+        outer=10,
+    )
+    assert "<vll.L2AccessInterface>" in xml
+    assert "&amp;" in xml
+    assert "port&x" not in xml
+    assert "<rtr.VirtualRouterIpAddress>" not in xml
+    site = build_site_create_xml("svc-mgr:service-9", "vpls", "10.10.1.1")
+    assert "<vpls.Site>" in site
+    assert "<siteId>10.10.1.1</siteId>" in site
+    down = build_sap_admin_xml("svc-mgr:service-1:10.10.1.1:ip-if-4", "vprn", "down")
+    assert "<vprn.L3AccessInterface>" in down
+    assert "<administrativeState>down</administrativeState>" in down
