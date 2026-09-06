@@ -40,6 +40,7 @@ VERBS = [
     "users",
     "tasks",
     "debug",
+    "cpaa",
 ]
 
 

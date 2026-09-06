@@ -63,6 +63,19 @@ def test_create_and_shutdown_lsp():
     assert ctx.store.lsps["lsp-test"].admin == "down"
 
 
+def test_viewer_cannot_cpaa_record():
+    ctx = _viewer_ctx()
+    ctx.live = True
+    out = dispatch(ctx, "cpaa record bgp")
+    assert "permiso denegado" in out.error
+
+
+def test_cpaa_record_requires_live():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "cpaa record bgp")
+    assert "en vivo" in out.error
+
+
 def test_viewer_cannot_create_lsp():
     ctx = _viewer_ctx()
     out = dispatch(

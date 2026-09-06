@@ -2,6 +2,8 @@ import pytest
 
 from nsp_grok.nsp_api import (
     NspApiError,
+    build_cpaa_record_xml,
+    raise_if_xml_fault,
     _alarm_from_row,
     _binding_from_row,
     _cpaa_from_row,
@@ -635,3 +637,28 @@ def test_find_body_query12_bgp_as_header_only():
     assert body["find"]["fullClassName"] == "topology.BgpAutonomousSystem"
     assert body["find"]["resultFilter"]["children"] == ""
     assert "filter" not in body["find"]
+
+
+def test_query17_xml_matches_samo_contract():
+    xml = build_cpaa_record_xml("network:10.251.243.250:cpaa")
+    assert "generic.GenericObject.configureInstance" in xml
+    assert 'xmlns="xmlapi_1.0"' in xml
+    assert "<distinguishedName>network:10.251.243.250:cpaa</distinguishedName>" in xml
+    assert "<bit>modify</bit>" in xml
+    assert "<bit>bgp</bit>" in xml
+    assert "<bit>ospf</bit>" in xml
+    assert "<bit>ospfTe</bit>" in xml
+    assert "<administrativeState>up</administrativeState>" in xml
+
+
+def test_query17_xml_escapes_fdn():
+    xml = build_cpaa_record_xml("network:10.0.0.1:cpaa&x")
+    assert "&amp;" in xml
+    assert "cpaa&x" not in xml
+
+
+def test_raise_if_xml_fault():
+    with pytest.raises(NspApiError, match="denied"):
+        raise_if_xml_fault(
+            '<?xml version="1.0"?><r><XMLException><description>denied</description></XMLException></r>'
+        )

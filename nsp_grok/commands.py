@@ -41,6 +41,7 @@ SLASH = {
     "quit": "cierra la sesión",
     "logout": "cierra la sesión",
     "debug": "imprime las peticiones HTTP",
+    "cpaa": "CPAA: show | record bgp [fdn]  (query 17, escritura)",
 }
 
 
@@ -115,6 +116,7 @@ def _handlers():
         "users": _users,
         "tasks": _tasks,
         "debug": _debug,
+        "cpaa": _cpaa_cmd,
     }
 
 
@@ -319,6 +321,7 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
         "logout": lambda: Outcome(quit=True),
         "exit": lambda: _exit_ctx(ctx, args),
         "debug": lambda: _debug(ctx, args),
+        "cpaa": lambda: _cpaa_cmd(ctx, args),
     }
     fn = mapping.get(name)
     if fn is None:
@@ -736,6 +739,44 @@ def _resync(ctx: Ctx, args: list[str]) -> Outcome:
         _task(ctx, f"resync {name}", f"ne:{name}")
         done.append(name)
     return Outcome(renderable=Text("resincronizado: " + ", ".join(done), style="green"))
+
+
+def _cpaa_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    action = args[0].lower() if args else "show"
+    if action in ("show", "list", "ls"):
+        if ctx.live and ctx.client is not None:
+            ctx.store.apply_cpaa(ctx.client.load_cpaa())
+            ctx.rebuild()
+        if not ctx.store.cpaa:
+            return Outcome(renderable=Text("sin CPAA en inventario (hace falta live)", style="yellow"))
+        from rich.console import Group as RichGroup
+
+        shown = [render.show_object(c, "cpaa") for c in ctx.store.cpaa]
+        return Outcome(renderable=RichGroup(*shown))
+    if action == "record" and len(args) >= 2 and args[1].lower() == "bgp":
+        if not can(ctx.user, "write"):
+            return Outcome(error="permiso denegado (write) — query 17 modifica el CPAA")
+        if not ctx.live or ctx.client is None:
+            return Outcome(error="query 17 requiere backend NSP en vivo (no lab)")
+        fdn = args[2] if len(args) >= 3 else (ctx.store.cpaa[0].fdn if ctx.store.cpaa else "")
+        if not fdn:
+            ctx.store.apply_cpaa(ctx.client.load_cpaa())
+            fdn = ctx.store.cpaa[0].fdn if ctx.store.cpaa else ""
+        if not fdn:
+            return Outcome(error="uso: cpaa record bgp [network:<ip>:cpaa]")
+        current = next((c for c in ctx.store.cpaa if c.fdn == fdn), None)
+        applied = ctx.client.configure_cpaa_bgp_record(fdn, current)
+        ctx.store.apply_cpaa(ctx.client.load_cpaa())
+        ctx.rebuild()
+        _task(ctx, f"query 17 protocolRecord+=bgp {applied}", applied)
+        return Outcome(
+            renderable=Text(
+                f"CPAA {applied}: protocolRecord incluye bgp (configureInstance). "
+                "No es automático; RIB puede tardar en popularse.",
+                style="green",
+            )
+        )
+    return Outcome(error="uso: cpaa [show]  |  cpaa record bgp [fdn]")
 
 
 def _whoami(ctx: Ctx, args: list[str]) -> Outcome:

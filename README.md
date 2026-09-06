@@ -68,7 +68,7 @@ Rama `arquitectura-nsp-grok`. CLI usable. Live cubre cliente → servicio → si
 
 **Live stats:** `stats <fdn>` en vivo hace find de `InterfaceAdditionalStatsLogRecord` (u otras) con `monitoredObjectPointer` + `between timeCaptured` (15 min) y `children: ""`. Sin política MIB o sin logs, muestra el lab. No usamos findToFile ni dump.
 
-**Producto (no es find de lectura):** primera instancia solo lectura — no crear servicios. MPLS create/shutdown sigue siendo del lab. Query 17 (`configureInstance` al CPAA) no se ejecuta: es escritura.
+**Producto:** primera instancia no crea servicios. MPLS create/shutdown sigue en lab. Query 17 es comando explícito `cpaa record bgp [fdn]` (write, live); no corre al login.
 
 **Deuda chica:** `port` es el último componente de `portPointer`; el FDN completo se muestra. `siteId` del NH CPAM se etiqueta como CPAA.
 

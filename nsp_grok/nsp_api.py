@@ -75,6 +75,52 @@ def build_find_body(
     return {"find": find_body}
 
 
+def build_cpaa_record_xml(
+    fdn: str,
+    event_bits: list[str] | None = None,
+    record_bits: list[str] | None = None,
+) -> str:
+    """Query 17: generic.GenericObject.configureInstance on topology.Cpaa (write)."""
+    from xml.sax.saxutils import escape
+
+    events = event_bits or ["ospf", "bgp"]
+    records = record_bits or ["ospf", "ospfTe", "bgp"]
+    ev = "".join(f"<bit>{escape(b)}</bit>" for b in events)
+    rec = "".join(f"<bit>{escape(b)}</bit>" for b in records)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        "<topology.Cpaa>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<protocolEventTypes>{ev}</protocolEventTypes>"
+        f"<protocolRecord>{rec}</protocolRecord>"
+        "<administrativeState>up</administrativeState>"
+        "</topology.Cpaa>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
+    )
+
+
+def raise_if_xml_fault(xml_text: str) -> None:
+    text = (xml_text or "").strip()
+    if not text.startswith("<"):
+        return
+    try:
+        root = ElementTree.fromstring(text)
+    except ElementTree.ParseError:
+        return
+    for el in root.iter():
+        if _strip_ns(el.tag) == "XMLException":
+            desc = next(
+                (c.text for c in el if _strip_ns(c.tag) == "description"),
+                el.text,
+            )
+            raise NspApiError(desc or "XMLException")
+
+
 def format_request(method: str, url: str, headers: dict[str, str], body: Any) -> str:
     lines = [f">>> {method} {url}", ">>> headers:"]
     lines.append(json.dumps(redact_headers(headers), indent=2, ensure_ascii=False))
@@ -165,17 +211,29 @@ class NspClient:
     def _url(self, path: str) -> str:
         return f"https://{self.host}{path}"
 
-    def _send(self, method: str, url: str, headers: dict[str, str], body: Any = None) -> requests.Response:
-        self.debug.emit(format_request(method, url, headers, body))
+    def _send(
+        self,
+        method: str,
+        url: str,
+        headers: dict[str, str],
+        body: Any = None,
+        xml: str | None = None,
+    ) -> requests.Response:
+        if xml is not None:
+            self.debug.emit(f">>> {method} {url}\n>>> body:\n{xml}")
+        else:
+            self.debug.emit(format_request(method, url, headers, body))
         try:
-            response = self._http.request(
-                method,
-                url,
-                headers=headers,
-                json=body,
-                timeout=self.timeout,
-                verify=self.verify,
-            )
+            kwargs: dict[str, Any] = {
+                "headers": headers,
+                "timeout": self.timeout,
+                "verify": self.verify,
+            }
+            if xml is not None:
+                kwargs["data"] = xml.encode("utf-8")
+            else:
+                kwargs["json"] = body
+            response = self._http.request(method, url, **kwargs)
         except KeyboardInterrupt as exc:
             self.debug.emit("<<< cancelado (Ctrl-C)")
             raise UserCancelled("Cancelado con Ctrl-C.") from exc
@@ -678,6 +736,38 @@ class NspClient:
             None,
         )
         return [cpaa for row in rows if (cpaa := _cpaa_from_row(row))]
+
+    def configure_cpaa_bgp_record(self, fdn: str, cpaa: Cpaa | None = None) -> str:
+        """Query 17: POST XML configureInstance. Explicit write; never called on login."""
+        if not self.token:
+            raise NspApiError("no hay token; login primero")
+        if not fdn:
+            raise NspApiError("hace falta el FDN del CPAA (network:<ip>:cpaa)")
+        events = ["ospf", "bgp"]
+        records = ["ospf", "ospfTe", "bgp"]
+        if cpaa:
+            ev = [b.strip() for b in cpaa.protocol_events.split(",") if b.strip()]
+            rec = [b.strip() for b in cpaa.protocol_record.split(",") if b.strip()]
+            if ev:
+                events = list(dict.fromkeys(ev + ["bgp"]))
+            if rec:
+                records = list(dict.fromkeys(rec + ["bgp"]))
+        xml = build_cpaa_record_xml(fdn, events, records)
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/xml",
+        }
+        last_err: NspApiError | None = None
+        for path in (f"{V3_BASE}/v3/xml", f"{V3_BASE}/v3/request"):
+            url = self._url(path)
+            response = self._send("POST", url, headers, xml=xml)
+            if response.ok:
+                raise_if_xml_fault(response.text)
+                return fdn
+            last_err = NspApiError(
+                f"query 17 configureInstance HTTP {response.status_code} contra {url}"
+            )
+        raise last_err or NspApiError("query 17 falló")
 
     def load_igp_domains(self) -> list[TopologyAs]:
         """Query 11: topology.AutonomousSystem — cabecera IGP, children empty (sin LSDB)."""

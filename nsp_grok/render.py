@@ -761,6 +761,8 @@ def help_text() -> RenderableType:
         ("/whoami", "usuario, rol, span of control"),
         ("/status", "resumen de sesión"),
         ("/debug [on|off]", "traza HTTP"),
+        ("/cpaa [show]", "estado del CPAA (query 10)"),
+        ("/cpaa record bgp [fdn]", "query 17: agrega bgp a protocolRecord (write)"),
         ("/clear", "limpia la pantalla"),
         ("/help", "esta ayuda"),
         ("/quit  /logout", "cierra la sesión"),
