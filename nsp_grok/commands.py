@@ -1729,6 +1729,25 @@ def _tunnel_cmd(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(renderable=render.show_sdp(tun))
 
 
+def _tunnel_unidir_note(ctx: Ctx, src_name: str, dst_name: str, src_ip: str, dst_ip: str) -> str:
+    reverse = None
+    origins = {dst_name, dst_ip}
+    dests = {src_name, src_ip}
+    for tun in ctx.store.tunnels.values():
+        if tun.from_ne in origins and (tun.to_ne in dests or tun.far_end in dests):
+            reverse = tun
+            break
+    base = (
+        f"Unidireccional ({src_name}→{dst_name} no cubre {dst_name}→{src_name}). "
+    )
+    if reverse is not None:
+        return base + f"El sentido inverso ya existe (sdp {reverse.sdp_id})."
+    return (
+        base
+        + f"Completá el sentido inverso: tunnel create from={dst_name} to={src_name} id=<sdpId>."
+    )
+
+
 def _lsp_fdn_of(ctx: Ctx, name: str, src_ip: str) -> str:
     lsp = ctx.store.lsps.get(name)
     if lsp is None:
@@ -1781,11 +1800,12 @@ def _tunnel_create(ctx: Ctx, args: list[str]) -> Outcome:
     sig = kv.get("sig") or kv.get("signaling") or ("mpls" if lsp_name else "tldp")
     name = kv.get("name") or f"sdp-{src_name}-{dst_name}"
     lsp_fdn = _lsp_fdn_of(ctx, lsp_name, src_ip) if lsp_name else ""
+    unidir = _tunnel_unidir_note(ctx, src_name, dst_name, src_ip, dst_ip)
     denied = _require_confirm(
         ctx,
         (
             f"Crear túnel SDP id={sdp_id} {src_name}({src_ip})→{dst_name}({dst_ip}) "
-            f"sig={sig} lsp={lsp_name or '—'} en {_backend_label(ctx)}"
+            f"sig={sig} lsp={lsp_name or '—'} en {_backend_label(ctx)}. {unidir}"
         ),
         flag,
     )
@@ -1814,6 +1834,7 @@ def _tunnel_create(ctx: Ctx, args: list[str]) -> Outcome:
         return Outcome(
             renderable=Group(
                 Text("creado en NSP (configureChildInstance svt.Tunnel, no automático)", style="green"),
+                Text(unidir, style="yellow"),
                 render.show_sdp(created),
             )
         )
@@ -1829,7 +1850,13 @@ def _tunnel_create(ctx: Ctx, args: list[str]) -> Outcome:
     ctx.store.add_tunnel(created)
     ctx.rebuild()
     _task(ctx, f"create tunnel {sdp_id}", f"sdp:{sdp_id}")
-    return Outcome(renderable=Group(Text("creado", style="green"), render.show_sdp(created)))
+    return Outcome(
+        renderable=Group(
+            Text("creado", style="green"),
+            Text(unidir, style="yellow"),
+            render.show_sdp(created),
+        )
+    )
 
 
 def _tunnel_admin(ctx: Ctx, args: list[str], admin: str) -> Outcome:

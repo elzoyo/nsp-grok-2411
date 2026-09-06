@@ -894,7 +894,8 @@ def tunnel_create_help() -> RenderableType:
         (
             "1",
             "El túnel SDP (svt.Tunnel) es transporte entre dos NEs, independiente del "
-            "servicio. Es unidireccional: A→B no cubre B→A.",
+            "servicio. Unidireccional (A→B no cubre B→A): hay que completar el sentido "
+            "inverso con otro tunnel create from=B to=A id=<sdpId>.",
         ),
         (
             "2",
@@ -926,7 +927,8 @@ def tunnel_create_help() -> RenderableType:
     ]:
         uso.add_row(cmd, desc)
     nota = Text.from_markup(
-        "[dim]Orden de red: LSP (opcional) → túnel SDP → SDP binding en el site del servicio → SAP.[/]"
+        "[dim]Orden de red: LSP (opcional) → túnel SDP → SDP binding en el site del servicio → SAP. "
+        "Unidireccional (A→B no cubre B→A): completá el sentido inverso.[/]"
     )
     return Group(
         Panel(schema, title="Create túnel SDP — jerarquía NFM-P", border_style="cyan"),

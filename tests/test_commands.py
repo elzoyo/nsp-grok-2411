@@ -635,6 +635,12 @@ def test_help_sdp_shows_hierarchy():
     buf = StringIO()
     Console(file=buf, width=120, color_system=None).print(out.renderable)
     assert "far-end" in buf.getvalue().lower() or "far-end" in buf.getvalue()
+    out = dispatch(ctx, "help tunnel")
+    buf = StringIO()
+    Console(file=buf, width=140, color_system=None).print(out.renderable)
+    help_txt = buf.getvalue()
+    assert "Unidireccional" in help_txt
+    assert "sentido inverso" in help_txt
 
 
 class _LiveSdpClient:
@@ -743,6 +749,32 @@ def test_tunnel_create_lab():
     assert tun.to_ne == "PE-ROSARIO-01"
     assert tun.lsp == "lsp-ba-ros"
     assert tun.far_end == "10.10.3.1"
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=140, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "Unidireccional" in text
+    assert "ya existe" in text
+
+
+def test_tunnel_create_asks_to_complete_reverse():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-CORDOBA-01 to=PE-MENDOZA-01 id=302 confirm=yes",
+    )
+    assert out.error == ""
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=140, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "Unidireccional" in text
+    assert "Completá el sentido inverso" in text
+    assert "from=PE-MENDOZA-01 to=PE-CORDOBA-01" in text
 
 
 def test_tunnel_create_rejects_same_ne_and_wrong_lsp():
