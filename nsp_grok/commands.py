@@ -14,7 +14,17 @@ from rich.text import Text
 from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
-from nsp_grok.models import AccessInterface, Lsp, SdpBinding, Service, ServiceSite, ServiceTunnel, Task, User
+from nsp_grok.models import (
+    AccessInterface,
+    Lsp,
+    MplsPath,
+    SdpBinding,
+    Service,
+    ServiceSite,
+    ServiceTunnel,
+    Task,
+    User,
+)
 from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
@@ -33,7 +43,8 @@ SLASH = {
     "status": "resumen de sesión",
     "whoami": "usuario, rol, span of control",
     "ne": "elementos de red",
-    "mpls": "objetos MPLS",
+    "routing": "vista de ruteo (live por NE)",
+    "mpls": "objetos MPLS (lsps|paths|tunnels|interfaces)",
     "alarms": "fallas",
     "stats": "estadísticas de performance",
     "topology": "topología ASCII",
@@ -103,6 +114,7 @@ def _handlers():
         "alarm": _alarm,
         "alarms": _alarm,
         "ne": _ne,
+        "routing": _routing,
         "customer": _customer,
         "customers": _customer,
         "service": _service,
@@ -193,6 +205,12 @@ def _help(ctx: Ctx, args: list[str]) -> Outcome:
         return Outcome(renderable=render.sdp_create_help())
     if topic[:1] in (["tunnel"], ["tunnels"]) or topic[:2] == ["create", "tunnel"]:
         return Outcome(renderable=render.tunnel_create_help())
+    if topic[:1] in (["path"], ["paths"]) or topic[:2] in (
+        ["create", "path"],
+        ["mpls", "path"],
+        ["mpls", "paths"],
+    ):
+        return Outcome(renderable=render.path_create_help())
     return Outcome(renderable=render.help_text())
 
 
@@ -210,7 +228,7 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
                     ctx.store.apply_ne_hardware(ne.name, ctx.client.load_ne_hardware(ne))
             ctx.rebuild()
             return None
-        if path[:1] == ["mpls"]:
+        if path[:1] in (["mpls"], ["routing"]) or "routing" in path:
             return _load_live_mpls(ctx)
         if path[:1] == ["alarms"]:
             return _load_live_alarms(ctx)
@@ -292,8 +310,13 @@ def _load_live_mpls(ctx: Ctx) -> Outcome | None:
     try:
         ctx.store.apply_nes(ctx.client.load_network_elements())
         visible = ctx.store.visible_nes(ctx.user)
-        lsps, tunnels, ifaces = ctx.client.load_mpls_inventory(visible)
-        ctx.store.apply_mpls_inventory(lsps, tunnels, ifaces)
+        inv = ctx.client.load_mpls_inventory(visible)
+        if len(inv) == 4:
+            lsps, tunnels, ifaces, paths = inv
+            ctx.store.apply_mpls_inventory(lsps, tunnels, ifaces, paths)
+        else:
+            lsps, tunnels, ifaces = inv
+            ctx.store.apply_mpls_inventory(lsps, tunnels, ifaces)
         ctx.rebuild()
     except UserCancelled:
         raise
@@ -402,6 +425,7 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
         "status": lambda: _status(ctx, args),
         "whoami": lambda: _whoami(ctx, args),
         "ne": lambda: _ne(ctx, args),
+        "routing": lambda: _routing(ctx, args),
         "mpls": lambda: _mpls(ctx, args),
         "customers": lambda: _customer(ctx, args),
         "customer": lambda: _customer(ctx, args),
@@ -534,6 +558,25 @@ def _ne(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(renderable=render.show_ne(ne))
 
 
+def _routing(ctx: Ctx, args: list[str]) -> Outcome:
+    err = _load_live_mpls(ctx)
+    if err is not None:
+        return err
+    visible = ctx.store.visible_nes(ctx.user)
+    if not args:
+        ctx.cwd = ["routing"]
+        return _ls(ctx, [])
+    token = args[0]
+    ep = _ne_endpoint(ctx, token)
+    if ep is None:
+        return Outcome(error=f"NE fuera del span of control: {token}")
+    name, _ip = ep
+    if name not in visible:
+        return Outcome(error=f"NE fuera del span of control: {token}")
+    ctx.cwd = ["routing", name]
+    return _inspect(ctx)
+
+
 def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
     err = _load_live_mpls(ctx)
     if err is not None:
@@ -543,20 +586,7 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
     if sub in ("lsps", "lsp"):
         return _mpls_lsp(ctx, rest)
     if sub in ("paths", "path"):
-        if rest:
-            path = ctx.store.paths.get(rest[0])
-            if path is None:
-                return Outcome(error=f"path desconocido: {rest[0]}")
-            return Outcome(renderable=render.show_path(path))
-        from rich.table import Table
-
-        t = Table(title="Paths MPLS", border_style="grey37")
-        t.add_column("nombre", style="bold")
-        t.add_column("tipo")
-        t.add_column("hops")
-        for p in ctx.store.paths.values():
-            t.add_row(p.name, p.hop_type, " → ".join(p.hops) or "(loose)")
-        return Outcome(renderable=t)
+        return _mpls_path(ctx, rest)
     if sub in ("tunnels", "tunnel") and rest:
         action = rest[0].lower()
         if action == "create":
@@ -645,6 +675,54 @@ def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(
         error="uso: mpls lsp [list|show <n>|create ...|shutdown <n>|turnup <n>|delete <n>]"
     )
+
+
+def _path_table(ctx: Ctx):
+    from rich.table import Table
+
+    t = Table(title="Paths MPLS  (mpls.ProvisionedPath)", border_style="grey37")
+    t.add_column("nombre", style="bold")
+    t.add_column("site")
+    t.add_column("tipo")
+    t.add_column("hops")
+    for p in ctx.store.paths.values():
+        t.add_row(
+            p.name,
+            p.site or "—",
+            p.hop_type,
+            " → ".join(p.hops) or "(loose)",
+        )
+    return t
+
+
+def _find_path(ctx: Ctx, token: str) -> MplsPath | None:
+    if token in ctx.store.paths:
+        return ctx.store.paths[token]
+    for path in ctx.store.paths.values():
+        if path.name == token or path.fdn == token:
+            return path
+        if path.site and token in {f"{path.name}@{path.site}", f"{path.site}:{path.name}"}:
+            return path
+    return None
+
+
+def _mpls_path(ctx: Ctx, args: list[str]) -> Outcome:
+    if not args or args[0].lower() in ("list", "ls"):
+        return Outcome(renderable=_path_table(ctx))
+    action = args[0].lower()
+    if action == "create":
+        return _path_create(ctx, args[1:])
+    if action == "show" and len(args) >= 2:
+        path = _find_path(ctx, args[1])
+        if path is None:
+            return Outcome(error=f"path desconocido: {args[1]}")
+        return Outcome(renderable=render.show_path(path))
+    if action == "delete" and len(args) >= 2:
+        return _path_delete(ctx, args[1:])
+    path = _find_path(ctx, args[0])
+    if path is not None:
+        return Outcome(renderable=render.show_path(path))
+    return Outcome(error="uso: mpls path [list|show <n>|create ...|delete <n>]")
 
 
 def _parse_kv(args: list[str]) -> dict[str, str]:
@@ -850,6 +928,135 @@ def _lsp_delete(ctx: Ctx, args: list[str]) -> Outcome:
     return Outcome(renderable=Text(f"eliminado {name}", style="green"))
 
 
+def _hop_tokens(raw: str) -> list[str]:
+    return [p.strip() for p in raw.replace("→", ",").split(",") if p.strip()]
+
+
+def _path_create(ctx: Ctx, args: list[str]) -> Outcome:
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
+    if not rest and not kv:
+        return Outcome(renderable=render.path_create_help())
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    name = kv.get("name") or ""
+    site_tok = kv.get("site") or kv.get("from") or kv.get("src") or ""
+    hops_raw = kv.get("hops") or kv.get("hop") or ""
+    hop_type = (kv.get("type") or kv.get("hoptype") or "strict").lower()
+    if hop_type not in {"strict", "loose"}:
+        return Outcome(error="type= debe ser strict o loose")
+    if not name or not site_tok:
+        return Outcome(
+            error="uso: mpls path create site=<NE> name=<path> hops=<NE>,<NE>,... [type=strict|loose] [confirm=yes]"
+        )
+    src = _ne_endpoint(ctx, site_tok)
+    if src is None:
+        return Outcome(error=f"NE origen fuera del span: {site_tok}")
+    src_name, src_ip = src
+    if not src_ip:
+        return Outcome(error="site necesita system IP (siteId)")
+    hop_eps: list[tuple[str, str]] = []
+    for token in _hop_tokens(hops_raw):
+        ep = _ne_endpoint(ctx, token)
+        if ep is None:
+            return Outcome(error=f"hop desconocido: {token}")
+        hop_eps.append(ep)
+    dest_ip = hop_eps[-1][1] if hop_eps else ""
+    existing = _find_path(ctx, name)
+    if existing is not None and (not existing.site or existing.site in {src_name, src_ip}):
+        return Outcome(error=f"el path ya existe: {name}")
+    path_id = kv.get("id") or ""
+    hop_xml = [(i, ip, hop_type) for i, (_n, ip) in enumerate(hop_eps, start=1)]
+    hops_label = " → ".join(n for n, _ip in hop_eps) or "(loose)"
+    denied = _require_confirm(
+        ctx,
+        (
+            f"Crear path MPLS {name} en {src_name}({src_ip}) "
+            f"hops={hops_label} type={hop_type} en {_backend_label(ctx)}"
+        ),
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.create_path(name, src_ip, hop_xml, dest_ip, path_id)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        created = _find_path(ctx, name)
+        if created is None:
+            created = MplsPath(
+                name=name,
+                hops=[n for n, _ip in hop_eps],
+                hop_type=hop_type,
+                site=src_name,
+                site_id=src_ip,
+                dest_id=dest_ip,
+                fdn=f"provisionedMplsTePath:from-{src_ip}-id-{path_id or name}",
+                path_id=path_id,
+                class_name="mpls.ProvisionedPath",
+            )
+            ctx.store.add_path(created)
+            ctx.rebuild()
+        _task(ctx, f"create path {name}", created.fdn or f"path:{name}")
+        return Outcome(
+            renderable=Group(
+                Text(
+                    "creado en NSP (configureChildInstance mpls.ProvisionedPath, no automático)",
+                    style="green",
+                ),
+                render.show_path(created),
+            )
+        )
+    created = MplsPath(
+        name=name,
+        hops=[n for n, _ip in hop_eps],
+        hop_type=hop_type,
+        site=src_name,
+        site_id=src_ip,
+        dest_id=dest_ip,
+        class_name="mpls.ProvisionedPath",
+    )
+    ctx.store.add_path(created)
+    ctx.rebuild()
+    _task(ctx, f"create path {name}", f"path:{name}")
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_path(created)))
+
+
+def _path_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: mpls path delete <n> [confirm=yes]")
+    token = rest[0]
+    path = _find_path(ctx, token)
+    if path is None:
+        return Outcome(error=f"path desconocido: {token}")
+    if ctx.live and ctx.client is not None and not path.fdn:
+        return Outcome(error=f"el path {path.name} no tiene FDN live; no se borra en el NSP")
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar path MPLS {path.name} en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.delete_path(path.fdn)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        if _find_path(ctx, path.name) is not None:
+            ctx.store.remove_path(path.name)
+            ctx.rebuild()
+    else:
+        ctx.store.remove_path(path.name)
+        ctx.rebuild()
+    _task(ctx, f"delete path {path.name}", path.fdn or f"path:{path.name}")
+    return Outcome(renderable=Text(f"eliminado path {path.name}", style="green"))
+
+
 def _customer(ctx: Ctx, args: list[str]) -> Outcome:
     if ctx.live and ctx.client is not None:
         ctx.store.apply_customers(ctx.client.load_customers())
@@ -912,12 +1119,16 @@ def _create_cmd(ctx: Ctx, args: list[str]) -> Outcome:
         return _sdp_create(ctx, rest[1:] + extra)
     if rest and rest[0].lower() in {"tunnel", "tunnels"}:
         return _tunnel_create(ctx, rest[1:] + extra)
+    if rest and rest[0].lower() in {"path", "paths"}:
+        return _path_create(ctx, rest[1:] + extra)
     if ctx.cwd and ctx.cwd[-1] == "saps":
         return _sap_create(ctx, args)
     if ctx.cwd and ctx.cwd[-1] in {"sdp-bindings", "bindings"}:
         return _sdp_create(ctx, args)
     if ctx.cwd and (ctx.cwd[-1] == "tunnels" or ctx.cwd[:2] == ["mpls", "tunnels"]):
         return _tunnel_create(ctx, args)
+    if ctx.cwd and (ctx.cwd[-1] == "paths" or ctx.cwd[:2] == ["mpls", "paths"]):
+        return _path_create(ctx, args)
     if ctx.cwd[:1] == ["mpls"]:
         return _lsp_create(ctx, args)
     return _service_create(ctx, args)

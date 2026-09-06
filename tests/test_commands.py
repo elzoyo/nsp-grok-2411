@@ -3,6 +3,7 @@ import pytest
 from nsp_grok.app import build_ctx
 from nsp_grok.commands import dispatch
 from nsp_grok.lab import Store
+from nsp_grok.models import MplsPath
 from nsp_grok.nsp_api import NspApiError, UserCancelled
 
 
@@ -830,3 +831,164 @@ def test_live_tunnel_create_posts_to_nsp():
     assert client.created[0][0] == 119
     assert client.created[0][1] == "10.10.1.1"
     assert client.created[0][2] == "10.10.2.1"
+
+
+def test_mpls_path_list_lab():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "/mpls paths")
+    assert out.error == ""
+    assert "path-ba-cba" in ctx.store.paths
+
+
+def test_create_path_lab():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "mpls path create site=PE-BAIRES-01 name=path-test hops=PE-BAIRES-01,PE-CORDOBA-01 type=strict confirm=yes",
+    )
+    assert out.error == ""
+    path = ctx.store.paths["path-test"]
+    assert path.site == "PE-BAIRES-01"
+    assert path.hops == ["PE-BAIRES-01", "PE-CORDOBA-01"]
+    assert path.hop_type == "strict"
+    out = dispatch(ctx, "mpls path delete path-test confirm=yes")
+    assert out.error == ""
+    assert "path-test" not in ctx.store.paths
+
+
+def test_viewer_cannot_create_path():
+    ctx = _viewer_ctx()
+    out = dispatch(
+        ctx,
+        "mpls path create site=PE-BAIRES-01 name=path-x hops=PE-CORDOBA-01",
+    )
+    assert "permiso denegado" in out.error
+
+
+def test_path_create_requires_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "mpls path create site=PE-BAIRES-01 name=path-noconfirm hops=PE-CORDOBA-01",
+    )
+    assert "confirmación" in out.error
+    assert "path-noconfirm" not in ctx.store.paths
+
+
+def _live_path(name="path-live", fdn="provisionedMplsTePath:from-10.10.1.1-id-9"):
+    return MplsPath(
+        name,
+        ["PE-BAIRES-01", "PE-CORDOBA-01"],
+        site="PE-BAIRES-01",
+        site_id="10.10.1.1",
+        fdn=fdn,
+        path_id="9" if fdn else "",
+        class_name="mpls.ProvisionedPath",
+    )
+
+
+class _LivePathClient:
+    def __init__(self, paths: list[MplsPath] | None = None) -> None:
+        self.created: list[tuple] = []
+        self.deleted: list[str] = []
+        self.loaded = 0
+        self.paths = list(paths or [])
+
+    def load_network_elements(self):
+        return {}
+
+    def load_mpls_inventory(self, nes):
+        self.loaded += 1
+        return [], [], [], list(self.paths)
+
+    def create_path(self, name, source_ip, hops, dest_ip="", path_id=""):
+        self.created.append((name, source_ip, hops, dest_ip, path_id))
+        self.paths.append(
+            MplsPath(
+                name,
+                [ip for _i, ip, _t in hops],
+                site="PE-BAIRES-01",
+                site_id=source_ip,
+                dest_id=dest_ip,
+                fdn=f"provisionedMplsTePath:from-{source_ip}-id-{path_id or name}",
+                path_id=path_id,
+                class_name="mpls.ProvisionedPath",
+            )
+        )
+        return name
+
+    def delete_path(self, fdn):
+        self.deleted.append(fdn)
+        return fdn
+
+
+def test_live_path_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LivePathClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "mpls path create site=PE-BAIRES-01 name=path-live hops=PE-CORDOBA-01 type=strict confirm=yes",
+    )
+    assert out.error == ""
+    assert client.created
+    assert client.created[0][0] == "path-live"
+    assert client.created[0][1] == "10.10.1.1"
+    assert client.created[0][2][0][1] == "10.10.2.1"
+    assert "path-live" in ctx.store.paths
+
+
+def test_live_mpls_paths_replaces_lab():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LivePathClient([_live_path()])
+    ctx.client = client
+    out = dispatch(ctx, "/mpls paths")
+    assert out.error == ""
+    assert client.loaded >= 1
+    assert "path-live" in ctx.store.paths
+    assert "path-ba-cba" not in ctx.store.paths
+
+
+def test_live_routing_loads_mpls():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LivePathClient([_live_path()])
+    ctx.client = client
+    out = dispatch(ctx, "/routing")
+    assert out.error == ""
+    assert client.loaded >= 1
+    assert ctx.cwd == ["routing"]
+    out = dispatch(ctx, "/routing PE-BAIRES-01")
+    assert out.error == ""
+    assert ctx.cwd == ["routing", "PE-BAIRES-01"]
+
+
+def test_live_path_delete_needs_fdn():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LivePathClient([_live_path("path-ba-cba", fdn="")])
+    ctx.client = client
+    out = dispatch(ctx, "mpls path delete path-ba-cba confirm=yes")
+    assert "FDN" in out.error
+    assert client.deleted == []
+
+
+def test_help_path_shows_hierarchy():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "help path")
+    assert out.error == ""
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=140, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "ProvisionedPath" in text
+    assert "provisionedMplsTePath" in text
+    assert "ProvisionedHop" in text
+    out = dispatch(ctx, "mpls path create")
+    buf = StringIO()
+    Console(file=buf, width=140, color_system=None).print(out.renderable)
+    assert "site=" in buf.getvalue()

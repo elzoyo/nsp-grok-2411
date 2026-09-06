@@ -97,6 +97,12 @@ class MplsPath:
     name: str
     hops: list[str]
     hop_type: str = "strict"
+    site: str = ""
+    site_id: str = ""
+    dest_id: str = ""
+    fdn: str = ""
+    path_id: str = ""
+    class_name: str = ""
 
 
 @dataclass

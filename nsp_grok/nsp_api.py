@@ -27,6 +27,7 @@ from nsp_grok.models import (
     Lsp,
     MacEntry,
     MplsInterface,
+    MplsPath,
     RouteNextHop,
     RouteTarget,
     SdpBinding,
@@ -190,6 +191,51 @@ def build_delete_instance_xml(fdn: str) -> str:
 def build_lsp_delete_xml(fdn: str) -> str:
     """deleteInstance on an existing LSP. Explicit write."""
     return build_delete_instance_xml(fdn)
+
+
+def build_path_create_xml(
+    name: str,
+    source_ip: str,
+    hops: list[tuple[int, str, str]],
+    dest_ip: str = "",
+    path_id: str = "",
+) -> str:
+    """configureChildInstance mpls.ProvisionedPath under FDN provisionedMplsTePath."""
+    from xml.sax.saxutils import escape
+
+    extra = ""
+    if path_id:
+        extra += f"<pathId>{escape(path_id)}</pathId>"
+    if dest_ip:
+        extra += f"<destinationNodeId>{escape(dest_ip)}</destinationNodeId>"
+    hops_xml = "".join(
+        f"<mpls.ProvisionedHop>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<hopId>{int(idx)}</hopId>"
+        f"<ipAddress>{escape(ip)}</ipAddress>"
+        f"<type>{escape(htype)}</type>"
+        f"</mpls.ProvisionedHop>"
+        for idx, ip, htype in hops
+        if ip
+    )
+    children = f"<children-Set>{hops_xml}</children-Set>" if hops_xml else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        "<distinguishedName>provisionedMplsTePath</distinguishedName>"
+        "<childConfigInfo>"
+        "<mpls.ProvisionedPath>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<displayedName>{escape(name)}</displayedName>"
+        f"<sourceNodeId>{escape(source_ip)}</sourceNodeId>"
+        "<administrativeState>up</administrativeState>"
+        f"{extra}{children}"
+        "</mpls.ProvisionedPath>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
 
 
 SVC_XML_CLASS = {
@@ -1214,6 +1260,32 @@ class NspClient:
         self._post_xml(build_lsp_delete_xml(fdn), "mpls lsp delete")
         return fdn
 
+    def create_path(
+        self,
+        name: str,
+        source_ip: str,
+        hops: list[tuple[int, str, str]],
+        dest_ip: str = "",
+        path_id: str = "",
+    ) -> str:
+        """Explicit write: configureChildInstance mpls.ProvisionedPath under provisionedMplsTePath."""
+        if not name or not source_ip:
+            raise NspApiError("mpls path create: name y site (system IP) son obligatorios")
+        self._post_xml(
+            build_path_create_xml(name, source_ip, hops, dest_ip, path_id),
+            "mpls path create",
+        )
+        return name
+
+    def delete_path(self, fdn: str) -> str:
+        """Explicit write: deleteInstance. Never auto."""
+        if not fdn or not str(fdn).startswith("provisionedMplsTePath"):
+            raise NspApiError(
+                "hace falta el FDN live del path (provisionedMplsTePath:from-<ip>-id-<pathId>)"
+            )
+        self._post_xml(build_delete_instance_xml(fdn), "mpls path delete")
+        return fdn
+
     def create_service(
         self,
         svc_type: str,
@@ -1550,12 +1622,13 @@ class NspClient:
 
     def load_mpls_inventory(
         self, nes: dict[str, NetworkElement]
-    ) -> tuple[list[Lsp], list[ServiceTunnel], list[MplsInterface]]:
-        """LSPs / SDP / interfaces MPLS por NE. Nunca dump global."""
+    ) -> tuple[list[Lsp], list[ServiceTunnel], list[MplsInterface], list[MplsPath]]:
+        """LSPs / SDP / interfaces / paths MPLS por NE. Nunca dump global."""
         return (
             self.load_mpls_lsps(nes),
             self.load_mpls_tunnels(nes),
             self.load_mpls_interfaces(nes),
+            self.load_mpls_paths(nes),
         )
 
     def load_mpls_lsps(self, nes: dict[str, NetworkElement]) -> list[Lsp]:
@@ -1699,6 +1772,76 @@ class NspClient:
                     continue
                 seen.add(key)
                 out.append(iface)
+        return out
+
+    def load_mpls_paths(self, nes: dict[str, NetworkElement]) -> list[MplsPath]:
+        """mpls.ProvisionedPath + mpls.ProvisionedHop por NE. Nunca dump global."""
+        path_attrs = [
+            "objectFullName",
+            "displayedName",
+            "sourceNodeId",
+            "destinationNodeId",
+            "fromNodeId",
+            "toNodeId",
+            "pathId",
+            "administrativeState",
+            "operationalState",
+            "type",
+        ]
+        hop_attrs = [
+            "objectFullName",
+            "displayedName",
+            "hopId",
+            "ipAddress",
+            "nodeId",
+            "type",
+            "pathId",
+            "sourceNodeId",
+            "mplsPathName",
+        ]
+        hops_by_parent: dict[str, list[tuple[int, str, str]]] = {}
+        out: list[MplsPath] = []
+        seen: set[str] = set()
+        for ne in nes.values():
+            if not ne.system_ip:
+                continue
+            filters = [
+                {"equal": {"name": "sourceNodeId", "value": ne.system_ip}},
+                {
+                    "wildcard": {
+                        "name": "objectFullName",
+                        "value": f"provisionedMplsTePath:from-{ne.system_ip}%",
+                    }
+                },
+            ]
+            path_rows: list[dict[str, Any]] = []
+            hop_rows: list[dict[str, Any]] = []
+            hop_seen: set[str] = set()
+            for filt in filters:
+                rows = self._optional_find(["mpls.ProvisionedPath"], path_attrs, filt)
+                if rows and not path_rows:
+                    path_rows = rows
+                for hop in self._optional_find(["mpls.ProvisionedHop"], hop_attrs, filt):
+                    hfdn = str(hop.get("objectFullName") or "")
+                    key = hfdn or f"{hop.get('pathId')}:{hop.get('hopId')}"
+                    if key in hop_seen:
+                        continue
+                    hop_seen.add(key)
+                    hop_rows.append(hop)
+            for hop in hop_rows:
+                parent, hop_id, ip, htype = _provisioned_hop(hop)
+                if not parent or not ip:
+                    continue
+                hops_by_parent.setdefault(parent, []).append((hop_id, ip, htype))
+            for row in path_rows:
+                path = _path_from_row(row, ne, nes, hops_by_parent)
+                if path is None:
+                    continue
+                key = path.fdn or f"{path.site}:{path.name}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(path)
         return out
 
     def load_bgp_rib_info(
@@ -2050,6 +2193,75 @@ def _lsp_from_row(
         fdn=fdn,
         class_name=class_name or _lsp_xml_class(lsp_type),
         path_id=path_id,
+    )
+
+
+def _hop_type(value: Any) -> str:
+    text = str(value or "strict").strip().lower()
+    if text in {"2", "loose", "loosehop", "loose-hop"}:
+        return "loose"
+    if text in {"1", "strict", "stricthop", "strict-hop", ""}:
+        return "strict"
+    return text
+
+
+def _path_parent_fdn(fdn: str) -> str:
+    text = (fdn or "").strip()
+    if ":hop-" in text:
+        return text.rsplit(":hop-", 1)[0]
+    return text
+
+
+def _provisioned_hop(row: dict[str, Any]) -> tuple[str, int, str, str]:
+    fdn = str(row.get("objectFullName") or "")
+    parent = _path_parent_fdn(fdn)
+    if not parent or parent == fdn:
+        src = str(row.get("sourceNodeId") or "")
+        pid = str(row.get("pathId") or "")
+        if src and pid:
+            parent = f"provisionedMplsTePath:from-{src}-id-{pid}"
+        elif ":hop-" not in fdn:
+            parent = fdn
+    hop_id = _int_field(row, "hopId") or 0
+    ip = str(row.get("ipAddress") or row.get("nodeId") or "").strip()
+    if not ip:
+        ip = _pointer_tail(row.get("ipAddrPointer") or row.get("interfacePointer") or "")
+    return parent, hop_id, ip, _hop_type(row.get("type") or row.get("hopType"))
+
+
+def _path_from_row(
+    row: dict[str, Any],
+    ne: NetworkElement,
+    nes: dict[str, NetworkElement],
+    hops_by_parent: dict[str, list[tuple[int, str, str]]],
+) -> MplsPath | None:
+    fdn = str(row.get("objectFullName") or "")
+    name = str(row.get("displayedName") or row.get("mplsPathName") or "")
+    if not name:
+        name = fdn.rsplit(":", 1)[-1] if fdn else ""
+    if name.startswith("from-") and "-id-" in name:
+        name = name.rsplit("-id-", 1)[-1]
+    if not name:
+        return None
+    src = str(row.get("sourceNodeId") or row.get("fromNodeId") or ne.system_ip)
+    dst = str(row.get("destinationNodeId") or row.get("toNodeId") or "")
+    path_id = str(row.get("pathId") or "")
+    parent = _path_parent_fdn(fdn)
+    raw_hops = list(hops_by_parent.get(parent) or hops_by_parent.get(fdn) or [])
+    raw_hops.sort(key=lambda item: item[0])
+    hop_names = [_ne_label(nes, ip, ip) for _idx, ip, _ht in raw_hops]
+    types = [ht for _idx, _ip, ht in raw_hops]
+    hop_type = types[0] if types and len(set(types)) == 1 else ("mixed" if types else "strict")
+    return MplsPath(
+        name=name,
+        hops=hop_names,
+        hop_type=hop_type,
+        site=_ne_label(nes, src, ne.name),
+        site_id=src,
+        dest_id=dst,
+        fdn=fdn,
+        path_id=path_id,
+        class_name="mpls.ProvisionedPath",
     )
 
 

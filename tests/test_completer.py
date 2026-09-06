@@ -20,8 +20,10 @@ def test_detect_create_kind():
     assert detect_create_kind(["sap", "create"], []) == "sap"
     assert detect_create_kind(["create", "tunnel"], []) == "tunnel"
     assert detect_create_kind(["mpls", "lsp", "create"], []) == "lsp"
+    assert detect_create_kind(["mpls", "path", "create"], []) == "path"
     assert detect_create_kind(["service", "create"], []) == "service"
     assert detect_create_kind(["create"], ["mpls", "tunnels"]) == "tunnel"
+    assert detect_create_kind(["create"], ["mpls", "paths"]) == "path"
 
 
 def test_sap_create_completes_service_and_site():
@@ -48,6 +50,19 @@ def test_tunnel_create_lsp_filtered_by_direction():
     texts = _texts(ctx, "tunnel create from=PE-BAIRES-01 to=PE-CORDOBA-01 lsp=")
     assert "lsp=lsp-ba-cba" in texts
     assert "lsp=lsp-cba-ba" not in texts
+
+
+def test_path_create_completes_site_and_hops():
+    ctx = _ctx()
+    texts = _texts(ctx, "mpls path create site=")
+    assert any(t.startswith("site=PE-BAIRES-01") for t in texts)
+    texts = _texts(ctx, "mpls path create site=PE-BAIRES-01 hops=")
+    assert any(t.startswith("hops=PE-CORDOBA-01") for t in texts)
+    texts = _texts(ctx, "mpls path create site=PE-BAIRES-01 hops=PE-CORDOBA-01,")
+    assert any("P-CORE-01" in t for t in texts)
+    texts = _texts(ctx, "mpls path create type=")
+    assert "type=strict" in texts
+    assert "type=loose" in texts
 
 
 def test_service_create_customer_and_sites():

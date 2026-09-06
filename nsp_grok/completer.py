@@ -48,6 +48,9 @@ VERBS = [
     "cpaa",
     "tunnel",
     "tunnels",
+    "routing",
+    "path",
+    "paths",
 ]
 
 CREATE_KEYS = {
@@ -56,6 +59,7 @@ CREATE_KEYS = {
     "sdp": ["service=", "site=", "far=", "sdp=", "vc=", "type=", "confirm="],
     "tunnel": ["from=", "to=", "id=", "lsp=", "sig=", "name=", "confirm="],
     "lsp": ["name=", "from=", "to=", "type=", "sig=", "path=", "id=", "confirm="],
+    "path": ["site=", "from=", "name=", "hops=", "type=", "id=", "confirm="],
 }
 
 
@@ -73,6 +77,8 @@ def detect_create_kind(parts: list[str], cwd: list[str]) -> str | None:
                 return "tunnel"
             if p[1] in {"lsp", "lsps"}:
                 return "lsp"
+            if p[1] in {"path", "paths"}:
+                return "path"
         if cwd:
             if cwd[-1] == "saps":
                 return "sap"
@@ -80,6 +86,8 @@ def detect_create_kind(parts: list[str], cwd: list[str]) -> str | None:
                 return "sdp"
             if cwd[-1] == "tunnels" or cwd[:2] == ["mpls", "tunnels"]:
                 return "tunnel"
+            if cwd[-1] == "paths" or cwd[:2] == ["mpls", "paths"]:
+                return "path"
             if cwd[:1] == ["mpls"]:
                 return "lsp"
         return "service"
@@ -95,6 +103,8 @@ def detect_create_kind(parts: list[str], cwd: list[str]) -> str | None:
         return "lsp"
     if p[0] == "mpls" and len(p) >= 3 and p[1] in {"tunnel", "tunnels"} and p[2] == "create":
         return "tunnel"
+    if p[0] == "mpls" and len(p) >= 3 and p[1] in {"path", "paths"} and p[2] == "create":
+        return "path"
     return None
 
 
@@ -145,6 +155,8 @@ def create_value_choices(ctx: Ctx, kind: str, assigned: dict[str, str], key: str
         return [("spoke", "spoke"), ("mesh", "VPLS")]
     if key == "type" and kind == "lsp":
         return [("dynamic", "RSVP"), ("static", ""), ("sr-te", "SR-TE"), ("bypass", "")]
+    if key == "type" and kind == "path":
+        return [("strict", "hop estricto"), ("loose", "hop loose")]
     if key == "sig" and kind in {"lsp", "tunnel"}:
         return [("rsvp", ""), ("tldp", ""), ("ldp", ""), ("sr", ""), ("mpls", ""), ("gre", "")]
     if key == "customer":
@@ -165,7 +177,10 @@ def create_value_choices(ctx: Ctx, kind: str, assigned: dict[str, str], key: str
     if key == "sites":
         taken = {t.strip() for t in assigned.get("sites", "").split(",") if t.strip()}
         return [(n, ne.system_ip) for n, ne in nes.items() if n not in taken]
-    if key in {"from", "site"} and kind in {"lsp", "tunnel", "sap", "sdp"}:
+    if key == "hops":
+        taken = {t.strip() for t in assigned.get("hops", "").split(",") if t.strip()}
+        return [(n, ne.system_ip) for n, ne in nes.items() if n not in taken]
+    if key in {"from", "site"} and kind in {"lsp", "tunnel", "sap", "sdp", "path"}:
         svc = _svc_from_assigned(ctx, assigned, kind)
         if kind in {"sap", "sdp"} and svc:
             sites = ctx.store.sites_of(svc.svc_id, ctx.user)
@@ -248,7 +263,7 @@ def create_key_choices(kind: str, assigned: dict[str, str], svc_type: str = "") 
         pass
     skip = set()
     for k in assigned:
-        if k != "sites":
+        if k not in {"sites", "hops"}:
             skip.add(k + "=")
     return [k for k in keys if k not in skip]
 
@@ -327,7 +342,7 @@ class NspCompleter(Completer):
                     yield Completion(name, start_position=-len(current))
         elif verb in ("mpls",):
             if len(parts) == 1 or (len(parts) == 2 and not text.endswith(" ")):
-                for w in ("lsps", "lsp", "paths", "tunnels", "interfaces"):
+                for w in ("lsps", "lsp", "paths", "path", "tunnels", "interfaces"):
                     if w.startswith(current):
                         yield Completion(w, start_position=-len(current))
             elif len(parts) == 2 or (len(parts) == 3 and not text.endswith(" ")):
@@ -338,6 +353,13 @@ class NspCompleter(Completer):
                     for name in self.ctx.store.lsps:
                         if name.startswith(current):
                             yield Completion(name, start_position=-len(current))
+                if parts[1] in ("path", "paths"):
+                    for w in ("list", "show", "create", "delete"):
+                        if w.startswith(current):
+                            yield Completion(w, start_position=-len(current))
+                    for name in self.ctx.store.paths:
+                        if name.startswith(current):
+                            yield Completion(name, start_position=-len(current))
             elif len(parts) >= 3 and parts[1] in ("lsp", "lsps") and parts[2] in (
                 "show",
                 "shutdown",
@@ -345,6 +367,13 @@ class NspCompleter(Completer):
                 "delete",
             ):
                 for name in self.ctx.store.lsps:
+                    if name.startswith(current):
+                        yield Completion(name, start_position=-len(current))
+            elif len(parts) >= 3 and parts[1] in ("path", "paths") and parts[2] in (
+                "show",
+                "delete",
+            ):
+                for name in self.ctx.store.paths:
                     if name.startswith(current):
                         yield Completion(name, start_position=-len(current))
         elif verb in ("alarm", "alarms"):
@@ -367,7 +396,7 @@ class NspCompleter(Completer):
             key, val = current.split("=", 1)
             key_l = key.lower()
             head, piece = "", val
-            if key_l == "sites" and "," in val:
+            if key_l in {"sites", "hops"} and "," in val:
                 head, piece = val.rsplit(",", 1)
                 head += ","
             for choice, meta in create_value_choices(self.ctx, kind, assigned, key_l):

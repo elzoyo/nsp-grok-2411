@@ -368,8 +368,17 @@ def show_lsp(lsp: Lsp) -> RenderableType:
 def show_path(path: MplsPath) -> RenderableType:
     hops = " → ".join(path.hops) if path.hops else "(ninguno)"
     return kv_table(
-        [("Nombre", path.name), ("Tipo de hop", path.hop_type), ("Hops", hops)],
-        title="Path MPLS",
+        [
+            ("Nombre", path.name),
+            ("Site", path.site or "—"),
+            ("Site ID", path.site_id or "—"),
+            ("Tipo de hop", path.hop_type),
+            ("Hops", hops),
+            ("Destino", path.dest_id or "—"),
+            ("pathId", path.path_id or "—"),
+            ("FDN", path.fdn or "—"),
+        ],
+        title="Path MPLS  (mpls.ProvisionedPath)",
     )
 
 
@@ -938,6 +947,75 @@ def tunnel_create_help() -> RenderableType:
     )
 
 
+def path_create_help() -> RenderableType:
+    schema = Text.from_markup(
+        """\
+[bold cyan]mpls.ProvisionedPathManager[/]     FDN [bold]provisionedMplsTePath[/]
+        │
+        └── [bold cyan]mpls.ProvisionedPath[/]      path explícito (SR OS path)
+                FDN  [bold]provisionedMplsTePath:from-<srcIp>-id-<pathId>[/]
+                sourceNodeId     = system IP del NE origen (site)
+                displayedName    = nombre del path en el NE
+                    │
+                    └── [bold cyan]mpls.ProvisionedHop[/]
+                            hopId / ipAddress / type=strict|loose
+                            FDN  …:hop-<hopId>
+"""
+    )
+    steps = Table(title="Comportamiento NFM-P al crear el path MPLS", border_style="grey37")
+    steps.add_column("#", style="bold cyan", justify="right")
+    steps.add_column("qué hace")
+    for n, desc in [
+        (
+            "1",
+            "El path MPLS (mpls.ProvisionedPath) es la ruta explícita que usa un LSP RSVP. "
+            "Es por NE origen: el mismo nombre puede existir en otro router.",
+        ),
+        (
+            "2",
+            "Se crea bajo mpls.ProvisionedPathManager (FDN provisionedMplsTePath). "
+            "GUI: Manage → MPLS → MPLS Paths → Create.",
+        ),
+        (
+            "3",
+            "site=/from= es el NE origen (system IP). hops= es la lista de NEs o IPs "
+            "en orden (hop index 1..n). type=strict|loose se aplica a todos los hops.",
+        ),
+        (
+            "4",
+            "En el NE queda config>router>mpls>path <nombre> hop <i> <ip> {strict|loose}. "
+            "El último hop es el destino (destinationNodeId).",
+        ),
+    ]:
+        steps.add_row(n, desc)
+    uso = Table(title="Uso", border_style="grey37")
+    uso.add_column("comando", style="bold cyan")
+    uso.add_column("detalle")
+    for cmd, desc in [
+        (
+            "mpls path create site=<NE> name=<path> hops=<NE>,<NE>,... [type=strict|loose]",
+            "pide confirmación",
+        ),
+        ("create path site=NE name=X hops=A,B", "desde mpls/paths"),
+        ("/mpls paths", "lista live por NE (nunca dump global)"),
+        ("/routing", "vista de ruteo live (NEs + MPLS del site)"),
+        ("mpls path delete <n>", "pide confirmación"),
+        ("Tab", "completa NEs en site= y hops="),
+        ("confirm=yes", "batch / script; en el REPL pregunta [sí/no]"),
+    ]:
+        uso.add_row(cmd, desc)
+    nota = Text.from_markup(
+        "[dim]Orden de red: path MPLS → LSP (path=) → túnel SDP → SDP binding → SAP. "
+        "mpls.Path es abstracto: se crea mpls.ProvisionedPath, no ActualPath/CSPFPath.[/]"
+    )
+    return Group(
+        Panel(schema, title="Create path MPLS — jerarquía NFM-P", border_style="cyan"),
+        steps,
+        uso,
+        nota,
+    )
+
+
 def help_text() -> RenderableType:
     flow = Table(title="Shell  user@NSP  ·  anidado como Fire / SR OS", border_style="grey37")
     flow.add_column("escribís", style="bold cyan")
@@ -978,6 +1056,7 @@ def help_text() -> RenderableType:
         ("/customer <id>", "abre un cliente (conteo VPRN/VPLS/Epipe)"),
         ("/services [id]", "servicios; con id, los de ese cliente"),
         ("/ne [nombre|IP]", "elementos de red (span of control)"),
+        ("/routing [NE]", "vista de ruteo live (NEs + MPLS por site)"),
         ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS (live por NE)"),
         ("/service create type=vprn|vpls|epipe id=N customer=C name=X", "crea servicio (pide confirmación)"),
         ("/sap create service=N site=NE port=P vlan=V [ip=a.b.c.d/p]", "crea SAP (pide confirmación)"),
@@ -988,6 +1067,7 @@ def help_text() -> RenderableType:
         ("/sdp shutdown|turnup|delete <sdp-id>", "admin SDP binding (shutdown/delete piden confirmación)"),
         ("/alarms [list|ack|clear|sev]", "fallas (live: fm.AlarmObject por NE)"),
         ("/mpls lsp create name=X from=NE to=NE", "crea LSP (pide confirmación)"),
+        ("/mpls path create site=NE name=X hops=NE,NE [type=strict|loose]", "crea path MPLS (pide confirmación)"),
         ("/mpls lsp shutdown|turnup|delete <n>", "admin LSP (shutdown/delete piden confirmación)"),
         ("/stats <fdn>", "stats live: find log record + timeCaptured (15 min)"),
         ("/topology", "topología ASCII del lab"),
@@ -1038,7 +1118,8 @@ def help_text() -> RenderableType:
         ids.add_row(cmd, desc)
 
     return Group(
-        flow, nav, slash, related, ids, sap_create_help(), sdp_create_help(), tunnel_create_help()
+        flow, nav, slash, related, ids,
+        sap_create_help(), sdp_create_help(), tunnel_create_help(), path_create_help(),
     )
 
 

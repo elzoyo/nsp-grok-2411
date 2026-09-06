@@ -18,12 +18,14 @@ from nsp_grok.nsp_api import (
     build_sdp_binding_create_xml,
     build_alarm_action_xml,
     build_tunnel_create_xml,
+    build_path_create_xml,
     build_delete_instance_xml,
     raise_if_xml_fault,
     _alarm_from_row,
     _binding_from_row,
     _cpaa_from_row,
     _lsp_from_row,
+    _path_from_row,
     _mac_from_row,
     _next_hop_from_row,
     _rib_from_row,
@@ -40,7 +42,7 @@ from nsp_grok.nsp_api import (
     parse_find_xml,
     redact_headers,
 )
-from nsp_grok.models import AccessInterface, Service, ServiceSite
+from nsp_grok.models import AccessInterface, NetworkElement, Service, ServiceSite
 
 
 def test_redact_authorization():
@@ -926,6 +928,93 @@ def test_sdp_binding_create_xml_spoke():
     assert "<svt.MeshSdpBinding>" in mesh
     down = build_sdp_binding_admin_xml("svc-mgr:service-1:10.10.1.1:circuit-1-100", "spoke", "down")
     assert "<administrativeState>down</administrativeState>" in down
+
+
+def test_find_body_provisioned_path_scoped_to_ne():
+    body = build_find_body(
+        "mpls.ProvisionedPath",
+        ["objectFullName", "displayedName", "sourceNodeId"],
+        {"equal": {"name": "sourceNodeId", "value": "10.10.1.1"}},
+    )
+    assert body["find"]["fullClassName"] == "mpls.ProvisionedPath"
+    assert body["find"]["resultFilter"]["children"] == ""
+    wild = build_find_body(
+        "mpls.ProvisionedHop",
+        ["objectFullName", "hopId", "ipAddress"],
+        {
+            "wildcard": {
+                "name": "objectFullName",
+                "value": "provisionedMplsTePath:from-10.10.1.1%",
+            }
+        },
+    )
+    assert wild["find"]["resultFilter"]["children"] == ""
+    assert "*" not in wild["find"]["filter"]["wildcard"]["value"]
+
+
+def test_path_create_xml_child_of_path_manager():
+    xml = build_path_create_xml(
+        "path-ba-cba",
+        "10.10.1.1",
+        [(1, "10.10.3.1", "strict"), (2, "10.10.2.1", "strict")],
+        dest_ip="10.10.2.1",
+    )
+    assert "generic.GenericObject.configureChildInstance" in xml
+    assert "<distinguishedName>provisionedMplsTePath</distinguishedName>" in xml
+    assert "<mpls.ProvisionedPath>" in xml
+    assert "<mpls.ProvisionedHop>" in xml
+    assert "<displayedName>path-ba-cba</displayedName>" in xml
+    assert "<sourceNodeId>10.10.1.1</sourceNodeId>" in xml
+    assert "<destinationNodeId>10.10.2.1</destinationNodeId>" in xml
+    assert "<hopId>1</hopId>" in xml
+    assert "<ipAddress>10.10.3.1</ipAddress>" in xml
+    assert "<type>strict</type>" in xml
+    escaped = build_path_create_xml("a&b", "10.0.0.1", [(1, "10.0.0.2", "loose")])
+    assert "&amp;" in escaped
+    assert "a&b" not in escaped
+    assert "<type>loose</type>" in escaped
+
+
+def test_path_from_row_keeps_fdn_and_hops():
+    ne = NetworkElement(
+        name="PE-BAIRES-01",
+        system_ip="10.10.1.1",
+        ne_type="7750 SR-7",
+        version="24.10",
+        site="BA",
+        group="METRO-BA",
+    )
+    dst = NetworkElement(
+        name="PE-CORDOBA-01",
+        system_ip="10.10.2.1",
+        ne_type="7750 SR-12",
+        version="24.10",
+        site="CBA",
+        group="METRO-CBA",
+    )
+    nes = {ne.name: ne, dst.name: dst}
+    fdn = "provisionedMplsTePath:from-10.10.1.1-id-3"
+    hops = {
+        fdn: [(1, "10.10.3.1", "strict"), (2, "10.10.2.1", "strict")],
+    }
+    path = _path_from_row(
+        {
+            "objectFullName": fdn,
+            "displayedName": "path-ba-cba",
+            "sourceNodeId": "10.10.1.1",
+            "destinationNodeId": "10.10.2.1",
+            "pathId": "3",
+        },
+        ne,
+        nes,
+        hops,
+    )
+    assert path is not None
+    assert path.fdn == fdn
+    assert path.site == "PE-BAIRES-01"
+    assert path.hops[-1] == "PE-CORDOBA-01"
+    assert path.hop_type == "strict"
+    assert path.class_name == "mpls.ProvisionedPath"
 
 
 def test_alarm_action_xml():

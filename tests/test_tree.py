@@ -44,6 +44,15 @@ def test_absolute_and_parent():
     assert up[0] == ["equipment", "METRO-BA"]
 
 
+def test_routing_ne_has_mpls_paths():
+    _store, _user, root = _root()
+    found = resolve(root, [], "/routing/PE-BAIRES-01/mpls/paths")
+    assert found is not None
+    names = set(found[1].children)
+    assert "path-ba-cba" in names
+    assert "path-core" not in names
+
+
 def test_span_hides_core_from_noc():
     store = Store()
     noc = store.users["noc"]

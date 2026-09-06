@@ -325,11 +325,27 @@ def seed_nes() -> dict[str, NetworkElement]:
 
 def seed_paths() -> dict[str, MplsPath]:
     paths = [
-        MplsPath("path-ba-cba", ["PE-BAIRES-01", "P-CORE-01", "P-CORE-02", "PE-CORDOBA-01"]),
-        MplsPath("path-ba-mza", ["PE-BAIRES-01", "P-CORE-01", "PE-MENDOZA-01"]),
-        MplsPath("path-ba-ros", ["PE-BAIRES-01", "PE-BAIRES-02", "PE-ROSARIO-01"]),
-        MplsPath("path-core", ["P-CORE-01", "P-CORE-02"]),
-        MplsPath("path-ba-sal", ["PE-BAIRES-01", "P-CORE-01", "PE-SALTA-01"]),
+        MplsPath(
+            "path-ba-cba",
+            ["PE-BAIRES-01", "P-CORE-01", "P-CORE-02", "PE-CORDOBA-01"],
+            site="PE-BAIRES-01",
+        ),
+        MplsPath(
+            "path-ba-mza",
+            ["PE-BAIRES-01", "P-CORE-01", "PE-MENDOZA-01"],
+            site="PE-BAIRES-01",
+        ),
+        MplsPath(
+            "path-ba-ros",
+            ["PE-BAIRES-01", "PE-BAIRES-02", "PE-ROSARIO-01"],
+            site="PE-BAIRES-01",
+        ),
+        MplsPath("path-core", ["P-CORE-01", "P-CORE-02"], site="P-CORE-01"),
+        MplsPath(
+            "path-ba-sal",
+            ["PE-BAIRES-01", "P-CORE-01", "PE-SALTA-01"],
+            site="PE-BAIRES-01",
+        ),
         MplsPath("loose-any", [], "loose"),
     ]
     return {p.name: p for p in paths}
@@ -1025,6 +1041,7 @@ class Store:
         lsps: list[Lsp],
         tunnels: list[ServiceTunnel],
         interfaces: list[MplsInterface],
+        paths: list[MplsPath] | None = None,
     ) -> None:
         if lsps:
             self.lsps = {lsp.name: lsp for lsp in lsps}
@@ -1032,3 +1049,32 @@ class Store:
             self.tunnels = {tun.sdp_id: tun for tun in tunnels}
         if interfaces:
             self.mpls_ifs = list(interfaces)
+        if paths is not None:
+            names = [p.name for p in paths]
+            collide = {n for n in names if names.count(n) > 1}
+            self.paths = {}
+            for path in paths:
+                key = (
+                    f"{path.name}@{path.site}"
+                    if path.name in collide and path.site
+                    else path.name
+                )
+                self.paths[key] = path
+
+    def add_path(self, path: MplsPath) -> None:
+        key = path.name
+        existing = self.paths.get(key)
+        if existing is not None and existing.site and path.site and existing.site != path.site:
+            self.paths.pop(key)
+            self.paths[f"{existing.name}@{existing.site}"] = existing
+            key = f"{path.name}@{path.site}"
+        self.paths[key] = path
+
+    def remove_path(self, token: str) -> None:
+        if token in self.paths:
+            self.paths.pop(token, None)
+            return
+        for key, path in list(self.paths.items()):
+            if path.name == token or path.fdn == token:
+                self.paths.pop(key, None)
+                return

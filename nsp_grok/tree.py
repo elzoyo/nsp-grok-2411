@@ -54,10 +54,12 @@ def build_tree(store: Store, user: User) -> Node:
         for lsp in store.lsps.values()
         if lsp.from_ne in nes or lsp.to_ne in nes
     }
-    path_kids = {
-        p.name: _leaf(p.name, "path", p, f"{len(p.hops)} hops")
-        for p in store.paths.values()
-    }
+    path_kids = {}
+    for key, p in store.paths.items():
+        label = f"{len(p.hops)} hops"
+        if p.site:
+            label = f"{p.site} · {label}"
+        path_kids[key] = _leaf(key, "path", p, label)
     tun_kids = {
         str(t.sdp_id): _leaf(str(t.sdp_id), "sdp", t, t.name)
         for t in store.tunnels.values()
@@ -342,11 +344,17 @@ def _routing_node(ne, store: Store, name: str = "Base") -> Node:
         for lsp in store.lsps.values()
         if lsp.from_ne == ne.name
     }
+    paths = {
+        key: _leaf(key, "path", p, f"{len(p.hops)} hops")
+        for key, p in store.paths.items()
+        if p.site == ne.name
+    }
     proto_kids = {p: _folder(p, p.upper()) for p in ne.protocols}
     if "mpls" in proto_kids:
         proto_kids["mpls"].children = {
             "interfaces": _folder("interfaces", "", **ifs),
             "lsps": _folder("lsps", "", **lsps),
+            "paths": _folder("paths", "", **paths),
         }
     return Node(
         name,
