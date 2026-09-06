@@ -26,6 +26,7 @@ from nsp_grok.models import (
     TopologyAs,
     Lsp,
     MacEntry,
+    MplsInterface,
     RouteNextHop,
     RouteTarget,
     SdpBinding,
@@ -104,6 +105,85 @@ def build_cpaa_record_xml(
         "</topology.Cpaa>"
         "</configInfo>"
         "</generic.GenericObject.configureInstance>"
+    )
+
+
+def _lsp_xml_class(lsp_type: str) -> str:
+    kind = (lsp_type or "dynamic").lower()
+    if kind == "static":
+        return "mpls.StaticLsp"
+    if kind in {"sr-te", "sr", "srte"}:
+        return "mpls.SegmentRoutingTeLsp"
+    if "bypass" in kind:
+        return "mpls.BypassOnlyLsp"
+    return "mpls.DynamicLsp"
+
+
+def build_lsp_create_xml(
+    name: str,
+    source_ip: str,
+    dest_ip: str,
+    lsp_type: str = "dynamic",
+    path_id: str = "",
+) -> str:
+    """configureChildInstance on singleton mpls.LspManager (FDN lsp). Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = _lsp_xml_class(lsp_type)
+    path_xml = f"<pathId>{escape(path_id)}</pathId>" if path_id else ""
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        "<distinguishedName>lsp</distinguishedName>"
+        "<childConfigInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<displayedName>{escape(name)}</displayedName>"
+        f"<sourceNodeId>{escape(source_ip)}</sourceNodeId>"
+        f"<destinationNodeId>{escape(dest_ip)}</destinationNodeId>"
+        "<administrativeState>up</administrativeState>"
+        f"{path_xml}"
+        f"</{cls}>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_lsp_admin_xml(fdn: str, admin: str, class_name: str = "") -> str:
+    """configureInstance administrativeState on an existing LSP. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    cls = class_name or "mpls.DynamicLsp"
+    state = "down" if admin == "down" else "up"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        f"<{cls}>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<administrativeState>{state}</administrativeState>"
+        f"</{cls}>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
+    )
+
+
+def build_lsp_delete_xml(fdn: str) -> str:
+    """deleteInstance on an existing LSP. Explicit write."""
+    from xml.sax.saxutils import escape
+
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.deleteInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "</generic.GenericObject.deleteInstance>"
     )
 
 
@@ -740,10 +820,25 @@ class NspClient:
         )
         return [cpaa for row in rows if (cpaa := _cpaa_from_row(row))]
 
-    def configure_cpaa_bgp_record(self, fdn: str, cpaa: Cpaa | None = None) -> str:
-        """Query 17: POST XML configureInstance. Explicit write; never called on login."""
+    def _post_xml(self, xml: str, what: str) -> None:
         if not self.token:
             raise NspApiError("no hay token; login primero")
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Content-Type": "application/xml",
+        }
+        last_err: NspApiError | None = None
+        for path in (f"{V3_BASE}/v3/xml", f"{V3_BASE}/v3/request"):
+            url = self._url(path)
+            response = self._send("POST", url, headers, xml=xml)
+            if response.ok:
+                raise_if_xml_fault(response.text)
+                return
+            last_err = NspApiError(f"{what} HTTP {response.status_code} contra {url}")
+        raise last_err or NspApiError(f"{what} falló")
+
+    def configure_cpaa_bgp_record(self, fdn: str, cpaa: Cpaa | None = None) -> str:
+        """Query 17: POST XML configureInstance. Explicit write; never called on login."""
         if not fdn:
             raise NspApiError("hace falta el FDN del CPAA (network:<ip>:cpaa)")
         events = ["ospf", "bgp"]
@@ -755,22 +850,39 @@ class NspClient:
                 events = list(dict.fromkeys(ev + ["bgp"]))
             if rec:
                 records = list(dict.fromkeys(rec + ["bgp"]))
-        xml = build_cpaa_record_xml(fdn, events, records)
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Content-Type": "application/xml",
-        }
-        last_err: NspApiError | None = None
-        for path in (f"{V3_BASE}/v3/xml", f"{V3_BASE}/v3/request"):
-            url = self._url(path)
-            response = self._send("POST", url, headers, xml=xml)
-            if response.ok:
-                raise_if_xml_fault(response.text)
-                return fdn
-            last_err = NspApiError(
-                f"query 17 configureInstance HTTP {response.status_code} contra {url}"
-            )
-        raise last_err or NspApiError("query 17 falló")
+        self._post_xml(build_cpaa_record_xml(fdn, events, records), "query 17 configureInstance")
+        return fdn
+
+    def create_lsp(
+        self,
+        name: str,
+        source_ip: str,
+        dest_ip: str,
+        lsp_type: str = "dynamic",
+        path_id: str = "",
+    ) -> str:
+        """Explicit write: configureChildInstance mpls.DynamicLsp under FDN lsp."""
+        if not name or not source_ip or not dest_ip:
+            raise NspApiError("mpls lsp create: name, from y to son obligatorios")
+        self._post_xml(
+            build_lsp_create_xml(name, source_ip, dest_ip, lsp_type, path_id),
+            "mpls lsp create",
+        )
+        return name
+
+    def configure_lsp_admin(self, fdn: str, admin: str, class_name: str = "") -> str:
+        """Explicit write: configureInstance administrativeState. Never auto."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del LSP (lsp:from-<ip>-id-<pathId>)")
+        self._post_xml(build_lsp_admin_xml(fdn, admin, class_name), "mpls lsp admin")
+        return fdn
+
+    def delete_lsp(self, fdn: str) -> str:
+        """Explicit write: deleteInstance. Never auto."""
+        if not fdn:
+            raise NspApiError("hace falta el FDN del LSP para borrar")
+        self._post_xml(build_lsp_delete_xml(fdn), "mpls lsp delete")
+        return fdn
 
     def load_igp_domains(self) -> list[TopologyAs]:
         """Query 11: topology.AutonomousSystem — cabecera IGP, children empty (sin LSDB)."""
@@ -868,6 +980,159 @@ class NspClient:
             },
         )
         return _cards_from_inventory(port_rows, card_rows)
+
+    def load_mpls_inventory(
+        self, nes: dict[str, NetworkElement]
+    ) -> tuple[list[Lsp], list[ServiceTunnel], list[MplsInterface]]:
+        """LSPs / SDP / interfaces MPLS por NE. Nunca dump global."""
+        return (
+            self.load_mpls_lsps(nes),
+            self.load_mpls_tunnels(nes),
+            self.load_mpls_interfaces(nes),
+        )
+
+    def load_mpls_lsps(self, nes: dict[str, NetworkElement]) -> list[Lsp]:
+        """mpls.DynamicLsp (y hermanas) filtradas por sourceNodeId de cada NE."""
+        attrs = [
+            "objectFullName",
+            "displayedName",
+            "sourceNodeId",
+            "destinationNodeId",
+            "fromNodeId",
+            "toNodeId",
+            "administrativeState",
+            "operationalState",
+            "type",
+            "pathId",
+            "pathName",
+        ]
+        classes = [
+            ("mpls.DynamicLsp", "dynamic", "rsvp"),
+            ("mpls.StaticLsp", "static", "rsvp"),
+            ("mpls.SegmentRoutingTeLsp", "sr-te", "sr"),
+            ("mpls.BypassOnlyLsp", "bypass", "rsvp"),
+        ]
+        out: list[Lsp] = []
+        seen: set[str] = set()
+        for ne in nes.values():
+            if not ne.system_ip:
+                continue
+            filters = [
+                {"equal": {"name": "sourceNodeId", "value": ne.system_ip}},
+                {
+                    "wildcard": {
+                        "name": "objectFullName",
+                        "value": f"lsp:from-{ne.system_ip}%",
+                    }
+                },
+            ]
+            for class_name, lsp_type, signaling in classes:
+                rows: list[dict[str, Any]] = []
+                for filt in filters:
+                    rows = self._optional_find([class_name], attrs, filt)
+                    if rows:
+                        break
+                for row in rows:
+                    lsp = _lsp_from_row(row, "", class_name=class_name, nes=nes)
+                    if lsp is None:
+                        continue
+                    if not lsp.lsp_type or lsp.lsp_type == "dynamic":
+                        lsp.lsp_type = lsp_type
+                    if not lsp.signaling or lsp.signaling == "rsvp":
+                        lsp.signaling = signaling
+                    key = lsp.fdn or lsp.name
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(lsp)
+        return out
+
+    def load_mpls_tunnels(self, nes: dict[str, NetworkElement]) -> list[ServiceTunnel]:
+        """svt.Tunnel por NE: wildcard network:<siteId>:%."""
+        out: list[ServiceTunnel] = []
+        seen: set[int] = set()
+        for ne in nes.values():
+            if not ne.system_ip:
+                continue
+            rows = self._optional_find(
+                ["svt.Tunnel"],
+                [
+                    "objectFullName",
+                    "displayedName",
+                    "id",
+                    "sdpId",
+                    "farEndIpAddress",
+                    "sourceSiteId",
+                    "destSiteId",
+                    "signaling",
+                    "lspPointer",
+                    "administrativeState",
+                    "operationalState",
+                ],
+                {
+                    "wildcard": {
+                        "name": "objectFullName",
+                        "value": f"network:{ne.system_ip}:%",
+                    }
+                },
+            )
+            if not rows:
+                rows = self._optional_find(
+                    ["svt.Tunnel"],
+                    None,
+                    {"equal": {"name": "sourceSiteId", "value": ne.system_ip}},
+                )
+            for row in rows:
+                sdp_id = _sdp_id_from_row(row) or _int_field(row, "id", "sdpId")
+                if sdp_id is None:
+                    continue
+                tun = _tunnel_from_row(row, sdp_id)
+                if tun is None or tun.sdp_id in seen:
+                    continue
+                if not tun.from_ne:
+                    tun.from_ne = ne.name
+                else:
+                    tun.from_ne = _ne_label(nes, tun.from_ne, tun.from_ne)
+                tun.to_ne = _ne_label(nes, tun.to_ne, tun.to_ne)
+                seen.add(tun.sdp_id)
+                out.append(tun)
+        return out
+
+    def load_mpls_interfaces(self, nes: dict[str, NetworkElement]) -> list[MplsInterface]:
+        """mpls.Interface por NE: wildcard network:<siteId>:%, children vacíos."""
+        out: list[MplsInterface] = []
+        seen: set[tuple[str, str]] = set()
+        for ne in nes.values():
+            if not ne.system_ip:
+                continue
+            rows = self._optional_find(
+                ["mpls.Interface"],
+                [
+                    "objectFullName",
+                    "displayedName",
+                    "administrativeState",
+                    "operationalState",
+                    "teMetric",
+                    "interfaceName",
+                    "portName",
+                ],
+                {
+                    "wildcard": {
+                        "name": "objectFullName",
+                        "value": f"network:{ne.system_ip}:%",
+                    }
+                },
+            )
+            for row in rows:
+                iface = _mpls_if_from_row(row, ne)
+                if iface is None:
+                    continue
+                key = (iface.ne, iface.name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(iface)
+        return out
 
     def load_bgp_rib_info(
         self, svc: Service, route_targets: list[RouteTarget]
@@ -1136,13 +1401,61 @@ def _tunnel_from_row(row: dict[str, Any], sdp_id: int) -> ServiceTunnel | None:
     )
 
 
-def _lsp_from_row(row: dict[str, Any], fallback_name: str) -> Lsp | None:
-    name = str(row.get("displayedName") or fallback_name)
+def _ne_label(nes: dict[str, NetworkElement] | None, ip_or_name: str, fallback: str) -> str:
+    token = (ip_or_name or "").strip()
+    if not token:
+        return fallback
+    if nes:
+        if token in nes:
+            return nes[token].name
+        for ne in nes.values():
+            if ne.system_ip == token or ne.name == token:
+                return ne.name
+    return token or fallback
+
+
+def _mpls_if_from_row(row: dict[str, Any], ne: NetworkElement) -> MplsInterface | None:
+    fdn = str(row.get("objectFullName") or "")
+    displayed = str(row.get("displayedName") or "")
+    name = displayed or (fdn.rsplit(":", 1)[-1] if fdn else "")
     if not name:
         return None
-    src = _pointer_tail(row.get("fromPointer") or row.get("sourceSiteId") or row.get("from"))
-    dst = _pointer_tail(row.get("toPointer") or row.get("destSiteId") or row.get("to"))
+    associated = str(
+        row.get("interfaceName") or row.get("portName") or row.get("portPointer") or ""
+    )
+    if ":" in associated:
+        associated = associated.rsplit(":", 1)[-1]
+    te = _int_field(row, "teMetric", "metric") or 0
+    return MplsInterface(
+        ne=ne.name,
+        name=name,
+        interface=associated or name,
+        te_metric=te,
+        admin=_state(row.get("administrativeState")),  # type: ignore[arg-type]
+        oper=_state(row.get("operationalState")),  # type: ignore[arg-type]
+    )
+
+
+def _lsp_from_row(
+    row: dict[str, Any],
+    fallback_name: str,
+    class_name: str = "",
+    nes: dict[str, NetworkElement] | None = None,
+) -> Lsp | None:
+    fdn = str(row.get("objectFullName") or "")
+    name = str(row.get("displayedName") or fallback_name)
+    if not name:
+        name = fdn.rsplit(":", 1)[-1] if fdn else ""
+    if not name:
+        return None
+    src = str(row.get("sourceNodeId") or row.get("fromNodeId") or "")
+    if not src:
+        src = _pointer_tail(row.get("fromPointer") or row.get("sourceSiteId") or row.get("from"))
+    dst = str(row.get("destinationNodeId") or row.get("toNodeId") or "")
+    if not dst:
+        dst = _pointer_tail(row.get("toPointer") or row.get("destSiteId") or row.get("to"))
     path = str(row.get("pathName") or row.get("path") or row.get("primaryPath") or "")
+    path_id = str(row.get("pathId") or "")
     hops_raw = row.get("hops") or row.get("hopList") or ""
     if isinstance(hops_raw, list):
         hops = [str(h) for h in hops_raw]
@@ -1150,18 +1463,21 @@ def _lsp_from_row(row: dict[str, Any], fallback_name: str) -> Lsp | None:
         hops = [p.strip() for p in str(hops_raw).replace("→", ",").split(",") if p.strip()]
     else:
         hops = []
-    lsp_type = str(row.get("type") or row.get("lspType") or "dynamic").lower()
-    sig = str(row.get("signaling") or row.get("signalingType") or "rsvp").lower()
+    lsp_type = str(row.get("type") or row.get("lspType") or "").lower()
+    sig = str(row.get("signaling") or row.get("signalingType") or "").lower()
     return Lsp(
         name=name,
         lsp_type=lsp_type if lsp_type else "dynamic",
         signaling=sig if sig else "rsvp",
-        from_ne=src,
-        to_ne=dst,
+        from_ne=_ne_label(nes, src, src),
+        to_ne=_ne_label(nes, dst, dst),
         path=path or "loose-any",
         hops=hops,
         admin=_state(row.get("administrativeState")),
         oper=_state(row.get("operationalState")),
+        fdn=fdn,
+        class_name=class_name or _lsp_xml_class(lsp_type),
+        path_id=path_id,
     )
 
 

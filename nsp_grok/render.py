@@ -357,6 +357,7 @@ def show_lsp(lsp: Lsp) -> RenderableType:
                 ("Protección", lsp.protection),
                 ("Estado administrativo", state(lsp.admin)),
                 ("Estado operacional", state(lsp.oper)),
+                ("FDN", lsp.fdn or "—"),
             ]
         ),
         title=f"LSP  {lsp.name}",
@@ -750,7 +751,9 @@ def help_text() -> RenderableType:
         ("/customer <id>", "abre un cliente (conteo VPRN/VPLS/Epipe)"),
         ("/services [id]", "servicios; con id, los de ese cliente"),
         ("/ne [nombre|IP]", "elementos de red (span of control)"),
-        ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS"),
+        ("/mpls [lsps|paths|tunnels|interfaces]", "transporte MPLS (live por NE)"),
+        ("/mpls lsp create name=X from=NE to=NE", "crea LSP (live: configureChildInstance)"),
+        ("/mpls lsp shutdown|turnup|delete <n>", "admin LSP (live: configureInstance)"),
         ("/alarms [list|ack|clear|sev]", "fallas"),
         ("/stats <fdn>", "stats live: find log record + timeCaptured (15 min)"),
         ("/topology", "topología ASCII del lab"),

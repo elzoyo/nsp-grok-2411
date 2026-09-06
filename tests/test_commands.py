@@ -85,6 +85,71 @@ def test_viewer_cannot_create_lsp():
     assert "permiso denegado" in out.error
 
 
+class _LiveMplsClient:
+    def __init__(self) -> None:
+        self.created: list[tuple[str, str, str, str, str]] = []
+        self.admin: list[tuple[str, str, str]] = []
+        self.deleted: list[str] = []
+
+    def load_network_elements(self):
+        return {}
+
+    def load_mpls_inventory(self, nes):
+        return [], [], []
+
+    def create_lsp(self, name, source_ip, dest_ip, lsp_type="dynamic", path_id=""):
+        self.created.append((name, source_ip, dest_ip, lsp_type, path_id))
+        return name
+
+    def configure_lsp_admin(self, fdn, admin, class_name=""):
+        self.admin.append((fdn, admin, class_name))
+        return fdn
+
+    def delete_lsp(self, fdn):
+        self.deleted.append(fdn)
+        return fdn
+
+
+def test_live_lsp_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveMplsClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "mpls lsp create name=lsp-live from=PE-BAIRES-01 to=PE-CORDOBA-01 type=dynamic",
+    )
+    assert out.error == ""
+    assert client.created == [
+        ("lsp-live", "10.10.1.1", "10.10.2.1", "dynamic", "")
+    ]
+    assert "lsp-live" in ctx.store.lsps
+
+
+def test_live_lsp_shutdown_needs_fdn():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveMplsClient()
+    ctx.client = client
+    out = dispatch(ctx, "mpls lsp shutdown lsp-ba-cba")
+    assert "FDN" in out.error
+    assert client.admin == []
+
+
+def test_live_lsp_shutdown_posts_configure_instance():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveMplsClient()
+    ctx.client = client
+    lsp = ctx.store.lsps["lsp-ba-cba"]
+    lsp.fdn = "lsp:from-10.10.1.1-id-1"
+    lsp.class_name = "mpls.DynamicLsp"
+    out = dispatch(ctx, "mpls lsp shutdown lsp-ba-cba")
+    assert out.error == ""
+    assert client.admin == [("lsp:from-10.10.1.1-id-1", "down", "mpls.DynamicLsp")]
+    assert ctx.store.lsps["lsp-ba-cba"].admin == "down"
+
+
 def test_alarm_ack():
     ctx = _admin_ctx()
     out = dispatch(ctx, "alarm ack A-1001")

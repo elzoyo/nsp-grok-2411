@@ -88,10 +88,23 @@ class NspCompleter(Completer):
                     yield Completion(name, start_position=-len(current))
         elif verb in ("mpls",):
             if len(parts) == 1 or (len(parts) == 2 and not text.endswith(" ")):
-                for w in ("lsps", "paths", "tunnels", "interfaces"):
+                for w in ("lsps", "lsp", "paths", "tunnels", "interfaces"):
                     if w.startswith(current):
                         yield Completion(w, start_position=-len(current))
-            elif len(parts) >= 2 and parts[1] in ("lsp", "lsps", "show"):
+            elif len(parts) == 2 or (len(parts) == 3 and not text.endswith(" ")):
+                if parts[1] in ("lsp", "lsps"):
+                    for w in ("list", "show", "create", "shutdown", "turnup", "delete"):
+                        if w.startswith(current):
+                            yield Completion(w, start_position=-len(current))
+                    for name in self.ctx.store.lsps:
+                        if name.startswith(current):
+                            yield Completion(name, start_position=-len(current))
+            elif len(parts) >= 3 and parts[1] in ("lsp", "lsps") and parts[2] in (
+                "show",
+                "shutdown",
+                "turnup",
+                "delete",
+            ):
                 for name in self.ctx.store.lsps:
                     if name.startswith(current):
                         yield Completion(name, start_position=-len(current))

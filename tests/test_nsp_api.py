@@ -2,9 +2,13 @@ import pytest
 
 from nsp_grok.nsp_api import (
     _cards_from_inventory,
+    _lsp_xml_class,
     _ne_from_row,
     NspApiError,
     build_cpaa_record_xml,
+    build_lsp_admin_xml,
+    build_lsp_create_xml,
+    build_lsp_delete_xml,
     raise_if_xml_fault,
     _alarm_from_row,
     _binding_from_row,
@@ -746,3 +750,75 @@ def test_cards_group_ports_by_card_slot():
     assert c1.card_type == "imm-2x10g"
     assert c1.ports[0].name == "1/1/1"
     assert c1.ports[0].mode == "access"
+
+
+def test_find_body_dynamic_lsp_scoped_to_ne():
+    body = build_find_body(
+        "mpls.DynamicLsp",
+        ["objectFullName", "displayedName", "sourceNodeId"],
+        {"equal": {"name": "sourceNodeId", "value": "10.10.1.1"}},
+    )
+    assert body["find"]["fullClassName"] == "mpls.DynamicLsp"
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert body["find"]["filter"]["equal"]["value"] == "10.10.1.1"
+    assert "filter" in body["find"]
+
+
+def test_find_body_mpls_interface_scoped_to_ne():
+    body = build_find_body(
+        "mpls.Interface",
+        ["objectFullName", "displayedName"],
+        {"wildcard": {"name": "objectFullName", "value": "network:10.10.1.1:%"}},
+    )
+    assert body["find"]["resultFilter"]["children"] == ""
+    assert "*" not in body["find"]["filter"]["wildcard"]["value"]
+
+
+def test_lsp_create_xml_child_of_lsp_manager():
+    xml = build_lsp_create_xml("lsp-ba-cba", "10.10.1.1", "10.10.2.1")
+    assert "generic.GenericObject.configureChildInstance" in xml
+    assert "<distinguishedName>lsp</distinguishedName>" in xml
+    assert "<mpls.DynamicLsp>" in xml
+    assert "<bit>create</bit>" in xml
+    assert "<displayedName>lsp-ba-cba</displayedName>" in xml
+    assert "<sourceNodeId>10.10.1.1</sourceNodeId>" in xml
+    assert "<destinationNodeId>10.10.2.1</destinationNodeId>" in xml
+
+
+def test_lsp_create_xml_srte_and_escape():
+    xml = build_lsp_create_xml("a&b", "10.0.0.1", "10.0.0.2", "sr-te", "9")
+    assert "<mpls.SegmentRoutingTeLsp>" in xml
+    assert "<pathId>9</pathId>" in xml
+    assert "&amp;" in xml
+    assert "a&b" not in xml
+
+
+def test_lsp_admin_and_delete_xml():
+    down = build_lsp_admin_xml("lsp:from-10.10.1.1-id-1", "down")
+    assert "generic.GenericObject.configureInstance" in down
+    assert "<bit>modify</bit>" in down
+    assert "<administrativeState>down</administrativeState>" in down
+    assert "<distinguishedName>lsp:from-10.10.1.1-id-1</distinguishedName>" in down
+    delete = build_lsp_delete_xml("lsp:from-10.10.1.1-id-1")
+    assert "generic.GenericObject.deleteInstance" in delete
+    assert _lsp_xml_class("bypass") == "mpls.BypassOnlyLsp"
+
+
+def test_lsp_from_row_keeps_fdn():
+    lsp = _lsp_from_row(
+        {
+            "objectFullName": "lsp:from-10.10.1.1-id-1",
+            "displayedName": "lsp-ba-cba",
+            "sourceNodeId": "10.10.1.1",
+            "destinationNodeId": "10.10.2.1",
+            "pathId": "1",
+            "administrativeState": "up",
+            "operationalState": "up",
+        },
+        "lsp-ba-cba",
+        class_name="mpls.DynamicLsp",
+    )
+    assert lsp is not None
+    assert lsp.fdn == "lsp:from-10.10.1.1-id-1"
+    assert lsp.class_name == "mpls.DynamicLsp"
+    assert lsp.path_id == "1"

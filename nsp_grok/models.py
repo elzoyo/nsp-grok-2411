@@ -114,6 +114,9 @@ class Lsp:
     setup_priority: int = 7
     hold_priority: int = 7
     protection: str = "none"
+    fdn: str = ""
+    class_name: str = ""
+    path_id: str = ""
 
 
 @dataclass

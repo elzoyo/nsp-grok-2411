@@ -14,7 +14,7 @@ from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
 from nsp_grok.models import Lsp, Task, User
-from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled
+from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
 
@@ -186,6 +186,8 @@ def _sync_live(ctx: Ctx) -> Outcome | None:
                     ctx.store.apply_ne_hardware(ne.name, ctx.client.load_ne_hardware(ne))
             ctx.rebuild()
             return None
+        if path[:1] == ["mpls"]:
+            return _load_live_mpls(ctx)
         if path[:1] != ["customers"]:
             return None
         ctx.store.apply_cpaa(ctx.client.load_cpaa())
@@ -256,6 +258,41 @@ def _exit_ctx(ctx: Ctx, args: list[str]) -> Outcome:
 
 def _unexpected(exc: BaseException) -> str:
     return f"Error inesperado ({type(exc).__name__}): {exc}"
+
+
+def _load_live_mpls(ctx: Ctx) -> Outcome | None:
+    if not ctx.live or ctx.client is None:
+        return None
+    try:
+        ctx.store.apply_nes(ctx.client.load_network_elements())
+        visible = ctx.store.visible_nes(ctx.user)
+        lsps, tunnels, ifaces = ctx.client.load_mpls_inventory(visible)
+        ctx.store.apply_mpls_inventory(lsps, tunnels, ifaces)
+        ctx.rebuild()
+    except UserCancelled:
+        raise
+    except KeyboardInterrupt as exc:
+        raise UserCancelled("Cancelado con Ctrl-C.") from exc
+    except NspApiError as exc:
+        return Outcome(error=str(exc), quit=True)
+    except Exception as exc:
+        return Outcome(error=_unexpected(exc), quit=True)
+    return None
+
+
+def _ne_endpoint(ctx: Ctx, token: str) -> tuple[str, str] | None:
+    """(name, system_ip) from visible NE name or IP."""
+    visible = ctx.store.visible_nes(ctx.user)
+    if token in visible:
+        ne = visible[token]
+        return ne.name, ne.system_ip
+    for ne in visible.values():
+        if ne.system_ip == token:
+            return ne.name, ne.system_ip
+    parts = token.split(".")
+    if len(parts) == 4 and all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+        return token, token
+    return None
 
 
 def dispatch(ctx: Ctx, line: str) -> Outcome:
@@ -447,6 +484,9 @@ def _ne(ctx: Ctx, args: list[str]) -> Outcome:
 
 
 def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
+    err = _load_live_mpls(ctx)
+    if err is not None:
+        return err
     sub = args[0].lower() if args else "lsps"
     rest = args[1:]
     if sub in ("lsps", "lsp"):
@@ -533,11 +573,25 @@ def _mpls_lsp(ctx: Ctx, args: list[str]) -> Outcome:
         if not can(ctx.user, "write"):
             return Outcome(error="permiso denegado (write)")
         name = args[1]
-        if name not in ctx.store.lsps:
+        lsp = ctx.store.lsps.get(name)
+        if lsp is None:
             return Outcome(error=f"LSP desconocido: {name}")
-        del ctx.store.lsps[name]
+        if ctx.live and ctx.client is not None:
+            if not lsp.fdn:
+                return Outcome(
+                    error=f"el LSP {name} no tiene FDN live; no se borra en el NSP"
+                )
+            ctx.client.delete_lsp(lsp.fdn)
+            err = _load_live_mpls(ctx)
+            if err is not None:
+                return err
+            if name in ctx.store.lsps:
+                del ctx.store.lsps[name]
+                ctx.rebuild()
+        else:
+            del ctx.store.lsps[name]
+            ctx.rebuild()
         _task(ctx, f"delete LSP {name}", f"lsp:{name}")
-        ctx.rebuild()
         return Outcome(renderable=Text(f"eliminado {name}", style="green"))
     # treat first arg as name
     lsp = ctx.store.lsps.get(args[0])
@@ -566,26 +620,63 @@ def _lsp_create(ctx: Ctx, args: list[str]) -> Outcome:
     dst = kv.get("to")
     if not name or not src or not dst:
         return Outcome(
-            error="uso: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P]"
+            error="uso: mpls lsp create name=X from=NE to=NE [type=dynamic] [sig=rsvp] [path=P] [id=N]"
         )
     if name in ctx.store.lsps:
         return Outcome(error=f"el LSP ya existe: {name}")
-    visible = ctx.store.visible_nes(ctx.user)
-    if src not in visible or dst not in visible:
+    src_ep = _ne_endpoint(ctx, src)
+    dst_ep = _ne_endpoint(ctx, dst)
+    if src_ep is None or dst_ep is None:
         return Outcome(error="NE origen/destino fuera del span of control")
+    src_name, src_ip = src_ep
+    dst_name, dst_ip = dst_ep
     path_name = kv.get("path", "loose-any")
     path = ctx.store.paths.get(path_name)
-    hops = path.hops if path else [src, dst]
+    hops = path.hops if path else [src_name, dst_name]
+    lsp_type = kv.get("type", "dynamic")
+    path_id = kv.get("id", "")
+    if ctx.live and ctx.client is not None:
+        if not src_ip or not dst_ip:
+            return Outcome(error="el NE origen/destino no tiene system IP (siteId)")
+        ctx.client.create_lsp(name, src_ip, dst_ip, lsp_type, path_id)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        created = ctx.store.lsps.get(name)
+        if created is None:
+            created = Lsp(
+                name=name,
+                lsp_type=lsp_type,
+                signaling=kv.get("sig", "rsvp"),
+                from_ne=src_name,
+                to_ne=dst_name,
+                path=path_name,
+                hops=hops,
+                bandwidth_mbps=int(kv.get("bw", "0")),
+                protection=kv.get("prot", "none"),
+                class_name=_lsp_xml_class(lsp_type),
+                path_id=path_id,
+            )
+            ctx.store.lsps[name] = created
+            ctx.rebuild()
+        _task(ctx, f"create LSP {name}", f"lsp:{name}")
+        return Outcome(
+            renderable=Group(
+                Text("creado en NSP (configureChildInstance, no automático)", style="green"),
+                render.show_lsp(created),
+            )
+        )
     lsp = Lsp(
         name=name,
-        lsp_type=kv.get("type", "dynamic"),
+        lsp_type=lsp_type,
         signaling=kv.get("sig", "rsvp"),
-        from_ne=src,
-        to_ne=dst,
+        from_ne=src_name,
+        to_ne=dst_name,
         path=path_name,
         hops=hops,
         bandwidth_mbps=int(kv.get("bw", "0")),
         protection=kv.get("prot", "none"),
+        path_id=path_id,
     )
     ctx.store.lsps[name] = lsp
     _task(ctx, f"create LSP {name}", f"lsp:{name}")
@@ -599,6 +690,16 @@ def _lsp_admin(ctx: Ctx, name: str, admin: str) -> Outcome:
     lsp = ctx.store.lsps.get(name)
     if lsp is None:
         return Outcome(error=f"LSP desconocido: {name}")
+    if ctx.live and ctx.client is not None:
+        if not lsp.fdn:
+            return Outcome(
+                error=f"el LSP {name} no tiene FDN live; no se cambia en el NSP"
+            )
+        ctx.client.configure_lsp_admin(lsp.fdn, admin, lsp.class_name)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        lsp = ctx.store.lsps.get(name) or lsp
     lsp.admin = admin  # type: ignore[assignment]
     lsp.oper = admin  # type: ignore[assignment]
     verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"

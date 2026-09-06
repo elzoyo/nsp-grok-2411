@@ -942,3 +942,16 @@ class Store:
         ne = self.nes.get(name)
         if ne is not None:
             ne.cards = cards
+
+    def apply_mpls_inventory(
+        self,
+        lsps: list[Lsp],
+        tunnels: list[ServiceTunnel],
+        interfaces: list[MplsInterface],
+    ) -> None:
+        if lsps:
+            self.lsps = {lsp.name: lsp for lsp in lsps}
+        if tunnels:
+            self.tunnels = {tun.sdp_id: tun for tun in tunnels}
+        if interfaces:
+            self.mpls_ifs = list(interfaces)
