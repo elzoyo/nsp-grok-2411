@@ -1,0 +1,6 @@
+! command: show vrf
+  Name                             Default RD          Protocols   Interfaces
+  CORP                             65000:110           ipv4        Gi1/0/24.110
+  OPE                              65000:10            ipv4        Gi1/0/1.10
+                                                                   Vlan10
+  TRA                              65000:200           ipv4        Gi1/0/23.200

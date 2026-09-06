@@ -1,5 +1,7 @@
 # NSP-Grok 24.11
 
+En la rama `relevar-sitio` también vive el CLI **`relevar`**: inventario pre-migración de un CE Cisco (un hop, SSH por OPE). Contrato: [`docs/MEMORIA_RELEVAR.md`](docs/MEMORIA_RELEVAR.md). Uso: [`relevar/README.md`](relevar/README.md).
+
 Shell de gestión **IP/MPLS** inspirado en Nokia **NFM-P / NSP Classic Management 24.11**.
 
 No replica la GUI Java. El operador inicia sesión y queda en una consola: prompt `usuario@IP_NSP>`, comandos anidados tipo Fire / SR OS, slash commands, Tab-complete y barra de estado.

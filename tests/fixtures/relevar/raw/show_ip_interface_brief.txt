@@ -1,0 +1,10 @@
+! command: show ip interface brief
+Interface              IP-Address      OK? Method Status                Protocol
+GigabitEthernet1/0/1   unassigned      YES NVRAM  up                    up
+GigabitEthernet1/0/1.10 10.0.6.250     YES NVRAM  up                    up
+GigabitEthernet1/0/23  unassigned      YES NVRAM  up                    up
+GigabitEthernet1/0/23.200 10.200.1.2   YES NVRAM  up                    up
+GigabitEthernet1/0/24  unassigned      YES NVRAM  up                    up
+GigabitEthernet1/0/24.110 10.110.1.2   YES NVRAM  up                    up
+GigabitEthernet1/0/48  unassigned      YES NVRAM  up                    up
+Vlan10                 10.0.6.1        YES NVRAM  up                    up

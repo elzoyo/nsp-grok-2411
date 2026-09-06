@@ -1,0 +1,5 @@
+! command: show ip ospf vrf TRA
+ Routing Process "ospf 200" with ID 10.0.6.250
+ Connected to MPLS VPN Superbackbone, VRF TRA
+    Area BACKBONE(0)
+        Number of interfaces in this area is 1

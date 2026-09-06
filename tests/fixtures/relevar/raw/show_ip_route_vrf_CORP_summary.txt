@@ -1,0 +1,10 @@
+! command: show ip route vrf CORP summary
+IP routing table name is CORP(0x2)
+IP routing table maximum-paths is 32
+Route Source    Networks    Subnets     Replicates  Overhead    Memory (bytes)
+connected       1           1           0           192         360
+static          2           0           0           128         240
+ospf 110        4           12          0           1024        1800
+  Intra-area: 10 Inter-area: 4 External-1: 2 External-2: 0
+internal        2                                               2320
+Total           9           13          0           1344        4720

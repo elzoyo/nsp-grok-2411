@@ -1,0 +1,4 @@
+! command: show inventory
+NAME: "Chassis", DESCR: "Cisco ISR4331 Chassis"
+NAME: "module 0", DESCR: "Cisco ISR4331 Built-In NIM controller"
+NAME: "NIM subslot 0/1", DESCR: "NIM-4G-LTE-GA Module"

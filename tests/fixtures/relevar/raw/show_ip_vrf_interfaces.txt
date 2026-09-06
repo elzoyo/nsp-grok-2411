@@ -1,0 +1,7 @@
+! command: show ip vrf interfaces
+Interface              IP-Address      VRF                              Protocol
+Gi1/0/1.10             10.0.6.250      OPE                              up
+Vlan10                 10.0.6.1        OPE                              up
+Gi1/0/24.110           10.110.1.2      CORP                             up
+Gi1/0/23.200           10.200.1.2      TRA                              up
+Gi1/0/48               unassigned      OPE                              up

@@ -1,0 +1,29 @@
+! command: show vrf detail
+VRF CORP (VRF Id = 2); default RD 65000:110; default VPNID <not set>
+  New CLI format, supports multiple address-families
+  Flags: 0x180C
+  Interfaces:
+    Gi1/0/24.110
+  Address family ipv4 unicast:
+    Flags: 0x0
+    Export VPN route-target communities
+      RT:65000:110
+    Import VPN route-target communities
+      RT:65000:110
+VRF OPE (VRF Id = 1); default RD 65000:10; default VPNID <not set>
+  Interfaces:
+    Gi1/0/1.10
+    Vlan10
+  Address family ipv4 unicast:
+    Export VPN route-target communities
+      RT:65000:10
+    Import VPN route-target communities
+      RT:65000:10
+VRF TRA (VRF Id = 3); default RD 65000:200; default VPNID <not set>
+  Interfaces:
+    Gi1/0/23.200
+  Address family ipv4 unicast:
+    Export VPN route-target communities
+      RT:65000:200
+    Import VPN route-target communities
+      RT:65000:200

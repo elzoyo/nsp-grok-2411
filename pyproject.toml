@@ -12,16 +12,18 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+relevar = ["netmiko>=4.3.0"]
 
 [project.scripts]
 nsp-grok = "nsp_grok.app:main"
+relevar = "relevar.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["nsp_grok*"]
+include = ["nsp_grok*", "relevar*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

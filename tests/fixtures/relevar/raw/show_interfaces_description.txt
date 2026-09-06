@@ -1,0 +1,10 @@
+! command: show interfaces description
+Interface                      Status         Protocol Description
+Gi1/0/1                        up             up       OPE SVI padre
+Gi1/0/1.10                     up             up       OPE gestion predio
+Gi1/0/23                       up             up       FO a SALTO TRA
+Gi1/0/23.200                   up             up       TRA a SALTO
+Gi1/0/24                       up             up       FO a MERCEDES CORP
+Gi1/0/24.110                   up             up       CORP a MERCEDES
+Gi1/0/48                       up             up       SW-PAYSANDU-L2
+Vlan10                         up             up       OPE SVI

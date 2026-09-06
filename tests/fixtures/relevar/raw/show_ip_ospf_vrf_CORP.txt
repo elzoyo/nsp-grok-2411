@@ -1,0 +1,10 @@
+! command: show ip ospf vrf CORP
+ Routing Process "ospf 110" with ID 10.0.6.250
+ Start time: 00:01:22.340, Time elapsed: 12w3d
+ Supports only single TOS(TOS0) routes
+ Supports opaque LSA
+ Connected to MPLS VPN Superbackbone, VRF CORP
+ It is an area border router
+ Router is not originating router-LSAs with maximum metric
+    Area BACKBONE(0)
+        Number of interfaces in this area is 1

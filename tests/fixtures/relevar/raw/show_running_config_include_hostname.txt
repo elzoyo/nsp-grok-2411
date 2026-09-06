@@ -1,0 +1,2 @@
+! command: show running-config | include hostname
+hostname NOD-PAYSANDU-CE

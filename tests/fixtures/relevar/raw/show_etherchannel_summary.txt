@@ -1,0 +1,4 @@
+! command: show etherchannel summary
+Flags:  D - down        P - bundled in port-channel
+Number of channel-groups in use: 0
+Number of aggregators:           0

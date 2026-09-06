@@ -1,0 +1,6 @@
+! command: show ip ospf interface vrf CORP
+GigabitEthernet1/0/24.110 is up, line protocol is up
+  Internet Address 10.110.1.2/30, Area 0
+  Process ID 110, Router ID 10.0.6.250, Network Type POINT_TO_POINT, Cost: 10
+  Transmit Delay is 1 sec, State POINT_TO_POINT
+  Timer intervals configured, Hello 10, Dead 40, Wait 40, Retransmit 5

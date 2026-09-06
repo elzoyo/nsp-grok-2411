@@ -1,0 +1,332 @@
+{
+  "nodo": {
+    "hostname": "NOD-PAYSANDU-CE",
+    "ip_ope": "10.0.6.250",
+    "plataforma": "IOS",
+    "ios": "17.09.04a",
+    "uptime": "12 weeks, 3 days, 4 hours, 21 minutes",
+    "inventario_fisico": [
+      "Chassis: Cisco ISR4331 Chassis",
+      "module 0: Cisco ISR4331 Built-In NIM controller",
+      "NIM subslot 0/1: NIM-4G-LTE-GA Module"
+    ]
+  },
+  "rack": {
+    "nombre": "RACK-1",
+    "unidades": 42,
+    "lado": "frente",
+    "origen_posicion": "inferida"
+  },
+  "equipo_rack": [
+    {
+      "hostname": "NOD-PAYSANDU-CE",
+      "rol": "CE",
+      "plataforma": "IOS",
+      "ru_inicio": 20,
+      "ru_alto": 2,
+      "faceplate": [
+        "Gi1/0/1",
+        "Gi1/0/23",
+        "Gi1/0/24",
+        "Gi1/0/48"
+      ]
+    },
+    {
+      "hostname": "SW-PAYSANDU-L2",
+      "rol": "L2",
+      "plataforma": "cisco WS-C2960-24TT-L",
+      "ru_inicio": 18,
+      "ru_alto": 1,
+      "faceplate": [
+        "Gi1/0/1"
+      ]
+    }
+  ],
+  "patchera": [
+    {
+      "id": "ODF-1",
+      "tipo": "FO-FC",
+      "ru_inicio": 41,
+      "n_conectores": 24,
+      "puertos_usados": [
+        1,
+        2
+      ]
+    }
+  ],
+  "conexion": [
+    {
+      "id": "loc-Gi1/0/48-SW-PAYSANDU-L2",
+      "clase": "local",
+      "medio": "cobre",
+      "conector_remoto": "rj45",
+      "if_local": "Gi1/0/48",
+      "if_remota": "Gi1/0/1",
+      "equipo_local": "NOD-PAYSANDU-CE",
+      "equipo_remoto": "SW-PAYSANDU-L2",
+      "sitio_remoto": null,
+      "patchera_id": null,
+      "patchera_puerto": null,
+      "vrf": "OPE",
+      "origen": "cdp"
+    },
+    {
+      "id": "ext-Gi1/0/24-MERCEDES-1",
+      "clase": "exterior",
+      "medio": "fo",
+      "conector_remoto": "fc",
+      "if_local": "Gi1/0/24",
+      "if_remota": "",
+      "equipo_local": "NOD-PAYSANDU-CE",
+      "equipo_remoto": null,
+      "sitio_remoto": "MERCEDES",
+      "patchera_id": "ODF-1",
+      "patchera_puerto": 1,
+      "vrf": "CORP",
+      "origen": "ospf"
+    },
+    {
+      "id": "ext-Gi1/0/23-SALTO-2",
+      "clase": "exterior",
+      "medio": "fo",
+      "conector_remoto": "fc",
+      "if_local": "Gi1/0/23",
+      "if_remota": "",
+      "equipo_local": "NOD-PAYSANDU-CE",
+      "equipo_remoto": null,
+      "sitio_remoto": "SALTO",
+      "patchera_id": "ODF-1",
+      "patchera_puerto": 2,
+      "vrf": "TRA",
+      "origen": "ospf"
+    }
+  ],
+  "vrf": [
+    {
+      "nombre": "CORP",
+      "rd": "65000:110",
+      "rt": [],
+      "interfaces": [
+        "Gi1/0/24.110"
+      ],
+      "protocolos": [
+        "ipv4"
+      ]
+    },
+    {
+      "nombre": "OPE",
+      "rd": "65000:10",
+      "rt": [],
+      "interfaces": [
+        "Gi1/0/1.10",
+        "Vlan10"
+      ],
+      "protocolos": [
+        "ipv4"
+      ]
+    },
+    {
+      "nombre": "TRA",
+      "rd": "65000:200",
+      "rt": [],
+      "interfaces": [
+        "Gi1/0/23.200"
+      ],
+      "protocolos": [
+        "ipv4"
+      ]
+    }
+  ],
+  "interfaz": [
+    {
+      "fisica": "Gi1/0/1",
+      "logica": "Gi1/0/1.10",
+      "vlan": "10",
+      "vrf": "OPE",
+      "ip": "10.0.6.250",
+      "mask": "",
+      "estado": "up",
+      "desc": "OPE gestion predio",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Vlan10",
+      "logica": "Vlan10",
+      "vlan": "10",
+      "vrf": "OPE",
+      "ip": "10.0.6.1",
+      "mask": "",
+      "estado": "up",
+      "desc": "OPE SVI",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/24",
+      "logica": "Gi1/0/24.110",
+      "vlan": "110",
+      "vrf": "CORP",
+      "ip": "10.110.1.2",
+      "mask": "",
+      "estado": "up",
+      "desc": "CORP a MERCEDES",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/23",
+      "logica": "Gi1/0/23.200",
+      "vlan": "200",
+      "vrf": "TRA",
+      "ip": "10.200.1.2",
+      "mask": "",
+      "estado": "up",
+      "desc": "TRA a SALTO",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/48",
+      "logica": "Gi1/0/48",
+      "vlan": "",
+      "vrf": "OPE",
+      "ip": "",
+      "mask": "",
+      "estado": "up",
+      "desc": "SW-PAYSANDU-L2",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/1",
+      "logica": "Gi1/0/1",
+      "vlan": "",
+      "vrf": "",
+      "ip": "",
+      "mask": "",
+      "estado": "up",
+      "desc": "OPE SVI padre",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/23",
+      "logica": "Gi1/0/23",
+      "vlan": "",
+      "vrf": "",
+      "ip": "",
+      "mask": "",
+      "estado": "up",
+      "desc": "FO a SALTO TRA",
+      "bundle": "",
+      "trunk_vlans": []
+    },
+    {
+      "fisica": "Gi1/0/24",
+      "logica": "Gi1/0/24",
+      "vlan": "",
+      "vrf": "",
+      "ip": "",
+      "mask": "",
+      "estado": "up",
+      "desc": "FO a MERCEDES CORP",
+      "bundle": "",
+      "trunk_vlans": []
+    }
+  ],
+  "vecino_l2": [
+    {
+      "proto": "cdp",
+      "if_local": "Gi1/0/48",
+      "if_remota": "Gi1/0/1",
+      "hostname": "SW-PAYSANDU-L2",
+      "ip_mgmt": "10.0.6.20",
+      "plataforma": "cisco WS-C2960-24TT-L"
+    }
+  ],
+  "ospf_process": [
+    {
+      "vrf": "CORP",
+      "process_id": "110",
+      "router_id": "",
+      "areas": [
+        "0"
+      ]
+    },
+    {
+      "vrf": "TRA",
+      "process_id": "200",
+      "router_id": "",
+      "areas": [
+        "0"
+      ]
+    }
+  ],
+  "ospf_neighbor": [
+    {
+      "vrf": "CORP",
+      "process_id": "110",
+      "router_id_local": "10.0.6.250",
+      "neighbor_rid": "10.1.1.1",
+      "neighbor_ip": "10.110.1.1",
+      "estado": "FULL",
+      "area": "0",
+      "if_logica": "Gi1/0/24.110",
+      "if_fisica": "Gi1/0/24",
+      "vlan": "110",
+      "costo": "10",
+      "network_type": "point_to_point",
+      "hostname_vecino": ""
+    },
+    {
+      "vrf": "TRA",
+      "process_id": "200",
+      "router_id_local": "10.0.6.250",
+      "neighbor_rid": "10.2.2.2",
+      "neighbor_ip": "10.200.1.1",
+      "estado": "FULL",
+      "area": "0",
+      "if_logica": "Gi1/0/23.200",
+      "if_fisica": "Gi1/0/23",
+      "vlan": "200",
+      "costo": "20",
+      "network_type": "point_to_point",
+      "hostname_vecino": ""
+    }
+  ],
+  "ruta_resumen": [
+    {
+      "vrf": "CORP",
+      "origen": "S",
+      "count": 360
+    },
+    {
+      "vrf": "CORP",
+      "origen": "O",
+      "count": 240
+    }
+  ],
+  "estatica": [],
+  "hsrp_vrrp": [],
+  "nat_flag": false,
+  "pim_neighbor": [],
+  "huecos": [
+    {
+      "codigo": "u_inferida",
+      "detalle": "posición U del rack inferida (no medida en sitio)"
+    },
+    {
+      "codigo": "ospf_sin_cdp",
+      "detalle": "CORP vecino 10.1.1.1 en Gi1/0/24.110 sin CDP/LLDP"
+    },
+    {
+      "codigo": "ospf_sin_cdp",
+      "detalle": "TRA vecino 10.2.2.2 en Gi1/0/23.200 sin CDP/LLDP"
+    },
+    {
+      "codigo": "vrf_sin_igp",
+      "detalle": "VRF OPE sin OSPF"
+    }
+  ]
+}
