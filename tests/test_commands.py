@@ -282,6 +282,29 @@ def test_help_is_spanish():
     assert "Comandos con /" in text
     assert "serviceId" in text
     assert "esta ayuda" in text
+    assert "Create SAP" in text
+    assert "svc-mgr:service-<id>:<siteId>" in text
+    assert "site = servicio × NE" in text
+
+
+def test_help_sap_shows_hierarchy():
+    ctx = _admin_ctx()
+    out = dispatch(ctx, "help sap")
+    assert out.error == ""
+    from io import StringIO
+    from rich.console import Console
+
+    buf = StringIO()
+    Console(file=buf, width=120, color_system=None).print(out.renderable)
+    text = buf.getvalue()
+    assert "netw.NetworkElement" in text
+    assert "L3/L2AccessInterface" in text
+    assert "portPointer" in text
+    assert "system IP" in text
+    out = dispatch(ctx, "sap create")
+    buf = StringIO()
+    Console(file=buf, width=120, color_system=None).print(out.renderable)
+    assert "vprn.Site" in buf.getvalue()
 
 
 def test_unknown_command_does_not_quit():

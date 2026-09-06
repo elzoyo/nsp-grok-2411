@@ -96,7 +96,7 @@ def _handlers():
         "info": _show,
         "cat": _show,
         "find": _find,
-        "help": lambda c, a: Outcome(renderable=render.help_text()),
+        "help": _help,
         "mpls": _mpls,
         "alarm": _alarm,
         "alarms": _alarm,
@@ -176,6 +176,13 @@ def _debug(ctx: Ctx, args: list[str]) -> Outcome:
     state = "on" if ctx.debug else "off"
     live = "NSP en vivo" if ctx.live else "lab (sin HTTP)"
     return Outcome(renderable=Text(f"debug {state}  ·  backend {live}", style="yellow"))
+
+
+def _help(ctx: Ctx, args: list[str]) -> Outcome:
+    topic = [a.lower() for a in args]
+    if topic[:1] in (["sap"], ["saps"]) or topic[:2] == ["create", "sap"]:
+        return Outcome(renderable=render.sap_create_help())
+    return Outcome(renderable=render.help_text())
 
 
 def _sync_live(ctx: Ctx) -> Outcome | None:
@@ -353,7 +360,9 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
     aliases = {"h": "help", "q": "quit", "logout": "quit", "info": "status"}
     name = aliases.get(name, name)
     mapping = {
-        "help": lambda: Outcome(renderable=render.help_text()),
+        "help": lambda: _help(ctx, args),
+        "sap": lambda: _sap_cmd(ctx, args),
+        "saps": lambda: _sap_cmd(ctx, args),
         "status": lambda: _status(ctx, args),
         "whoami": lambda: _whoami(ctx, args),
         "ne": lambda: _ne(ctx, args),
@@ -1209,19 +1218,16 @@ def _sap_cmd(ctx: Ctx, args: list[str]) -> Outcome:
 
 
 def _sap_create(ctx: Ctx, args: list[str]) -> Outcome:
-    if not can(ctx.user, "write"):
-        return Outcome(error="permiso denegado (write)")
     rest, flag = _split_confirm(args)
     kv = _parse_kv(rest)
+    if not rest and not kv:
+        return Outcome(renderable=render.sap_create_help())
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
     svc_key = kv.get("service") or kv.get("svc") or kv.get("id") or ""
     svc = _find_service(ctx, svc_key) if svc_key else _cwd_service(ctx)
     if svc is None:
-        return Outcome(
-            error=(
-                "uso: sap create service=<id> site=<NE|IP> port=<puerto|FDN> "
-                "vlan=<n> [ip=a.b.c.d/p] [inner=0] [confirm=yes]"
-            )
-        )
+        return Outcome(renderable=render.sap_create_help())
     site_tok = kv.get("site") or kv.get("ne") or _cwd_site_token(ctx)
     if not site_tok:
         return Outcome(error="sap create: site=<NE|IP> (o contexto sites/<siteId>)")

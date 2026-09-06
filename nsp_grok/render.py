@@ -711,6 +711,87 @@ def topology_ascii() -> RenderableType:
     return Panel(art, border_style="cyan", title="Aplicación → Topología")
 
 
+def sap_create_help() -> RenderableType:
+    """Jerarquía NFM-P y comportamiento al crear un SAP."""
+    schema = Text.from_markup(
+        """\
+[bold cyan]netw.NetworkElement[/]              siteId = system IP del router
+        │
+        └── [bold cyan]vprn.Site / vpls.Site / epipe.Site[/]
+                FDN  [bold]svc-mgr:service-<id>:<siteId>[/]
+                siteId = [bold]la misma IP del NE[/]
+                    │
+                    └── [bold cyan]L3/L2AccessInterface[/]  (SAP)
+                            portPointer → [bold]equipment.PhysicalPort[/]
+                            de [bold]ESE mismo NE[/]
+                            [dim]network:<siteId>:shelf-…:port-N[/]
+"""
+    )
+    steps = Table(title="Comportamiento NFM-P al crear el SAP", border_style="grey37")
+    steps.add_column("#", style="bold cyan", justify="right")
+    steps.add_column("qué hace")
+    for n, desc in [
+        (
+            "1",
+            "El servicio (vprn.Vprn / vpls.Vpls / epipe.Epipe) vive en svc-mgr. "
+            "Todavía no está en ningún router.",
+        ),
+        (
+            "2",
+            "El site es «este servicio en este NE». siteId no es un nombre libre: "
+            "es el system IP del NetworkElement. Sin NE con esa IP, el site no se crea.",
+        ),
+        (
+            "3",
+            "El SAP no cuelga del servicio suelto: cuelga del site. "
+            "El distinguishedName de create es svc-mgr:service-<id>:<siteId>.",
+        ),
+        (
+            "4",
+            "portPointer tiene que ser un puerto access/hybrid de ese NE. "
+            "NFM-P no deja un puerto de otro router.",
+        ),
+        (
+            "5",
+            "En VPRN la IP (rtr.VirtualRouterIpAddress) es hija del L3 Access Interface, "
+            "no del site. Por eso ip=a.b.c.d/p es obligatorio en VPRN.",
+        ),
+    ]:
+        steps.add_row(n, desc)
+
+    uso = Table(title="Uso", border_style="grey37")
+    uso.add_column("comando", style="bold cyan")
+    uso.add_column("detalle")
+    for cmd, desc in [
+        (
+            "sap create service=<id> site=<NE|IP> port=<puerto|FDN> vlan=<n> [ip=cidr]",
+            "site= se traduce al system IP del NE; pide confirmación",
+        ),
+        (
+            "create sap site=NE port=P vlan=V ip=…",
+            "desde el contexto del servicio (customers>12>vprn>100>)",
+        ),
+        ("sap shutdown|delete <nombre>", "piden confirmación"),
+        ("sap turnup <nombre>", "no pide confirmación"),
+        ("VPRN", "vprn.L3AccessInterface + rtr.VirtualRouterIpAddress"),
+        ("VPLS", "vpls.L2AccessInterface"),
+        ("Epipe", "vll.L2AccessInterface"),
+        ("confirm=yes", "batch / script; en el REPL pregunta [sí/no]"),
+    ]:
+        uso.add_row(cmd, desc)
+
+    nota = Text.from_markup(
+        "[dim]Resumen: site = servicio × NE. El SAP siempre pertenece a un site, "
+        "y por tanto a un NE. site=PE-BAIRES-01 es un atajo al siteId (system IP).[/]"
+    )
+    return Group(
+        Panel(schema, title="Create SAP — jerarquía NFM-P", border_style="cyan"),
+        steps,
+        uso,
+        nota,
+    )
+
+
 def help_text() -> RenderableType:
     flow = Table(title="Shell  user@NSP  ·  anidado como Fire / SR OS", border_style="grey37")
     flow.add_column("escribís", style="bold cyan")
@@ -807,7 +888,7 @@ def help_text() -> RenderableType:
     ]:
         ids.add_row(cmd, desc)
 
-    return Group(flow, nav, slash, related, ids)
+    return Group(flow, nav, slash, related, ids, sap_create_help())
 
 
 def _object_state(payload: Any) -> str:
