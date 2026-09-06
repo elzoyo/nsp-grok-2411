@@ -14,7 +14,7 @@ from rich.text import Text
 from nsp_grok import RELEASE
 from nsp_grok.auth import can, change_password
 from nsp_grok.lab import Store
-from nsp_grok.models import AccessInterface, Lsp, SdpBinding, Service, ServiceSite, Task, User
+from nsp_grok.models import AccessInterface, Lsp, SdpBinding, Service, ServiceSite, ServiceTunnel, Task, User
 from nsp_grok.nsp_api import NspApiError, NspClient, UserCancelled, _lsp_xml_class
 from nsp_grok import render
 from nsp_grok.tree import Node, build_tree, cli_prompt, pwd, resolve
@@ -29,6 +29,7 @@ SLASH = {
     "services": "VPRN / VPLS / Epipe  (create|shutdown|delete)",
     "sap": "SAP L3/L2 (create|shutdown|delete)",
     "sdp": "SDP binding spoke/mesh (create|shutdown|delete)",
+    "tunnel": "túnel SDP svt.Tunnel (create|shutdown|delete)",
     "status": "resumen de sesión",
     "whoami": "usuario, rol, span of control",
     "ne": "elementos de red",
@@ -112,6 +113,8 @@ def _handlers():
         "sdp": _sdp_cmd,
         "binding": _sdp_cmd,
         "bindings": _sdp_cmd,
+        "tunnel": _tunnel_cmd,
+        "tunnels": _tunnel_cmd,
         "stats": _stats,
         "resync": _resync,
         "topology": lambda c, a: Outcome(renderable=render.topology_ascii()),
@@ -188,6 +191,8 @@ def _help(ctx: Ctx, args: list[str]) -> Outcome:
         return Outcome(renderable=render.sap_create_help())
     if topic[:1] in (["sdp"], ["binding"]) or topic[:2] == ["create", "sdp"]:
         return Outcome(renderable=render.sdp_create_help())
+    if topic[:1] in (["tunnel"], ["tunnels"]) or topic[:2] == ["create", "tunnel"]:
+        return Outcome(renderable=render.tunnel_create_help())
     return Outcome(renderable=render.help_text())
 
 
@@ -392,6 +397,8 @@ def _slash(ctx: Ctx, rest: str) -> Outcome:
         "saps": lambda: _sap_cmd(ctx, args),
         "sdp": lambda: _sdp_cmd(ctx, args),
         "binding": lambda: _sdp_cmd(ctx, args),
+        "tunnel": lambda: _tunnel_cmd(ctx, args),
+        "tunnels": lambda: _tunnel_cmd(ctx, args),
         "status": lambda: _status(ctx, args),
         "whoami": lambda: _whoami(ctx, args),
         "ne": lambda: _ne(ctx, args),
@@ -550,6 +557,16 @@ def _mpls(ctx: Ctx, args: list[str]) -> Outcome:
         for p in ctx.store.paths.values():
             t.add_row(p.name, p.hop_type, " → ".join(p.hops) or "(loose)")
         return Outcome(renderable=t)
+    if sub in ("tunnels", "tunnel") and rest:
+        action = rest[0].lower()
+        if action == "create":
+            return _tunnel_create(ctx, rest[1:])
+        if action in ("shutdown", "shut") and len(rest) >= 2:
+            return _tunnel_admin(ctx, rest[1:], "down")
+        if action in ("turnup", "no-shutdown") and len(rest) >= 2:
+            return _tunnel_admin(ctx, rest[1:], "up")
+        if action == "delete" and len(rest) >= 2:
+            return _tunnel_delete(ctx, rest[1:])
     if sub in ("tunnels", "tunnel", "sdp"):
         from rich.table import Table
 
@@ -893,10 +910,14 @@ def _create_cmd(ctx: Ctx, args: list[str]) -> Outcome:
         return _sap_create(ctx, rest[1:] + extra)
     if rest and rest[0].lower() in {"sdp", "binding"}:
         return _sdp_create(ctx, rest[1:] + extra)
+    if rest and rest[0].lower() in {"tunnel", "tunnels"}:
+        return _tunnel_create(ctx, rest[1:] + extra)
     if ctx.cwd and ctx.cwd[-1] == "saps":
         return _sap_create(ctx, args)
     if ctx.cwd and ctx.cwd[-1] in {"sdp-bindings", "bindings"}:
         return _sdp_create(ctx, args)
+    if ctx.cwd and (ctx.cwd[-1] == "tunnels" or ctx.cwd[:2] == ["mpls", "tunnels"]):
+        return _tunnel_create(ctx, args)
     if ctx.cwd[:1] == ["mpls"]:
         return _lsp_create(ctx, args)
     return _service_create(ctx, args)
@@ -1680,6 +1701,206 @@ def _sdp_delete(ctx: Ctx, args: list[str]) -> Outcome:
         ctx.rebuild()
     _task(ctx, f"delete SDP {binding.sdp_id}", binding.fdn)
     return Outcome(renderable=Text(f"eliminado SDP {binding.sdp_id}", style="green"))
+
+
+def _tunnel_cmd(ctx: Ctx, args: list[str]) -> Outcome:
+    err = _load_live_mpls(ctx)
+    if err is not None:
+        return err
+    if not args or args[0].lower() in ("list", "ls"):
+        return _mpls(ctx, ["tunnels"])
+    action = args[0].lower()
+    if action == "create":
+        return _tunnel_create(ctx, args[1:])
+    if action in ("shutdown", "shut") and len(args) >= 2:
+        return _tunnel_admin(ctx, args[1:], "down")
+    if action in ("turnup", "no-shutdown") and len(args) >= 2:
+        return _tunnel_admin(ctx, args[1:], "up")
+    if action == "delete" and len(args) >= 2:
+        return _tunnel_delete(ctx, args[1:])
+    tun = ctx.store.tunnels.get(int(args[0])) if args[0].isdigit() else None
+    if tun is None:
+        tun = next(
+            (t for t in ctx.store.tunnels.values() if t.name == args[0] or str(t.sdp_id) == args[0]),
+            None,
+        )
+    if tun is None:
+        return Outcome(error=f"túnel SDP desconocido: {args[0]}")
+    return Outcome(renderable=render.show_sdp(tun))
+
+
+def _lsp_fdn_of(ctx: Ctx, name: str, src_ip: str) -> str:
+    lsp = ctx.store.lsps.get(name)
+    if lsp is None:
+        return ""
+    if lsp.fdn:
+        return lsp.fdn
+    if lsp.path_id:
+        return f"lsp:from-{src_ip}-id-{lsp.path_id}"
+    return ""
+
+
+def _tunnel_create(ctx: Ctx, args: list[str]) -> Outcome:
+    rest, flag = _split_confirm(args)
+    kv = _parse_kv(rest)
+    if not rest and not kv:
+        return Outcome(renderable=render.tunnel_create_help())
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    src_tok = kv.get("from") or kv.get("site") or kv.get("src") or ""
+    dst_tok = kv.get("to") or kv.get("far") or kv.get("farend") or kv.get("dst") or ""
+    id_raw = kv.get("id") or kv.get("sdp") or kv.get("sdpid") or ""
+    if not src_tok or not dst_tok or not id_raw.isdigit():
+        return Outcome(
+            error="uso: tunnel create from=<NE> to=<NE> id=<sdpId> [lsp=<nombre>] [sig=tldp] [name=] [confirm=yes]"
+        )
+    src = _ne_endpoint(ctx, src_tok)
+    dst = _ne_endpoint(ctx, dst_tok)
+    if src is None:
+        return Outcome(error=f"NE origen fuera del span: {src_tok}")
+    if dst is None:
+        return Outcome(error=f"NE destino fuera del span: {dst_tok}")
+    src_name, src_ip = src
+    dst_name, dst_ip = dst
+    if not src_ip or not dst_ip:
+        return Outcome(error="from y to necesitan system IP (siteId)")
+    if src_ip == dst_ip:
+        return Outcome(error="el túnel SDP es unidireccional: from y to no pueden ser el mismo NE")
+    sdp_id = int(id_raw)
+    if sdp_id in ctx.store.tunnels:
+        return Outcome(error=f"el túnel SDP ya existe: {sdp_id}")
+    lsp_name = kv.get("lsp") or kv.get("lspname") or ""
+    if lsp_name and lsp_name not in ctx.store.lsps:
+        return Outcome(error=f"LSP desconocido: {lsp_name}")
+    if lsp_name:
+        lsp = ctx.store.lsps[lsp_name]
+        if lsp.from_ne not in {src_name, src_ip} or lsp.to_ne not in {dst_name, dst_ip}:
+            return Outcome(
+                error=f"el LSP {lsp_name} no va de {src_name} a {dst_name}"
+            )
+    sig = kv.get("sig") or kv.get("signaling") or ("mpls" if lsp_name else "tldp")
+    name = kv.get("name") or f"sdp-{src_name}-{dst_name}"
+    lsp_fdn = _lsp_fdn_of(ctx, lsp_name, src_ip) if lsp_name else ""
+    denied = _require_confirm(
+        ctx,
+        (
+            f"Crear túnel SDP id={sdp_id} {src_name}({src_ip})→{dst_name}({dst_ip}) "
+            f"sig={sig} lsp={lsp_name or '—'} en {_backend_label(ctx)}"
+        ),
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        ctx.client.create_tunnel(sdp_id, src_ip, dst_ip, name, lsp_fdn, sig)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        created = ctx.store.tunnels.get(sdp_id)
+        if created is None:
+            created = ServiceTunnel(
+                sdp_id=sdp_id,
+                name=name,
+                from_ne=src_name,
+                to_ne=dst_name,
+                signaling=sig,
+                lsp=lsp_name,
+                far_end=dst_ip,
+                fdn=f"serviceTunnel:from-{src_ip}-id-{sdp_id}",
+            )
+            ctx.store.add_tunnel(created)
+            ctx.rebuild()
+        _task(ctx, f"create tunnel {sdp_id}", created.fdn or f"sdp:{sdp_id}")
+        return Outcome(
+            renderable=Group(
+                Text("creado en NSP (configureChildInstance svt.Tunnel, no automático)", style="green"),
+                render.show_sdp(created),
+            )
+        )
+    created = ServiceTunnel(
+        sdp_id=sdp_id,
+        name=name,
+        from_ne=src_name,
+        to_ne=dst_name,
+        signaling=sig,
+        lsp=lsp_name,
+        far_end=dst_ip,
+    )
+    ctx.store.add_tunnel(created)
+    ctx.rebuild()
+    _task(ctx, f"create tunnel {sdp_id}", f"sdp:{sdp_id}")
+    return Outcome(renderable=Group(Text("creado", style="green"), render.show_sdp(created)))
+
+
+def _tunnel_admin(ctx: Ctx, args: list[str], admin: str) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: tunnel shutdown|turnup <id> [confirm=yes]")
+    key = rest[0]
+    tun = ctx.store.tunnels.get(int(key)) if key.isdigit() else None
+    if tun is None:
+        tun = next((t for t in ctx.store.tunnels.values() if t.name == key), None)
+    if tun is None:
+        return Outcome(error=f"túnel SDP desconocido: {key}")
+    if admin == "down":
+        denied = _require_confirm(
+            ctx,
+            f"Apagar (shutdown) túnel SDP {tun.sdp_id} ({tun.name}) en {_backend_label(ctx)}",
+            flag,
+        )
+        if denied is not None:
+            return denied
+    if ctx.live and ctx.client is not None:
+        if not tun.fdn:
+            return Outcome(error=f"el túnel {tun.sdp_id} no tiene FDN live")
+        ctx.client.configure_tunnel_admin(tun.fdn, admin)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        tun = ctx.store.tunnels.get(tun.sdp_id) or tun
+    tun.admin = admin  # type: ignore[assignment]
+    tun.oper = admin  # type: ignore[assignment]
+    verb = "apagado (shutdown)" if admin == "down" else "levantado (no-shutdown)"
+    _task(ctx, f"{verb} tunnel {tun.sdp_id}", tun.fdn or f"sdp:{tun.sdp_id}")
+    return Outcome(renderable=Text(f"sdp-{tun.sdp_id} {verb}", style="green"))
+
+
+def _tunnel_delete(ctx: Ctx, args: list[str]) -> Outcome:
+    if not can(ctx.user, "write"):
+        return Outcome(error="permiso denegado (write)")
+    rest, flag = _split_confirm(args)
+    if not rest:
+        return Outcome(error="uso: tunnel delete <id> [confirm=yes]")
+    key = rest[0]
+    tun = ctx.store.tunnels.get(int(key)) if key.isdigit() else None
+    if tun is None:
+        tun = next((t for t in ctx.store.tunnels.values() if t.name == key), None)
+    if tun is None:
+        return Outcome(error=f"túnel SDP desconocido: {key}")
+    denied = _require_confirm(
+        ctx,
+        f"Eliminar túnel SDP {tun.sdp_id} ({tun.from_ne}→{tun.to_ne}) en {_backend_label(ctx)}",
+        flag,
+    )
+    if denied is not None:
+        return denied
+    if ctx.live and ctx.client is not None:
+        if not tun.fdn:
+            return Outcome(error=f"el túnel {tun.sdp_id} no tiene FDN live")
+        ctx.client.delete_tunnel(tun.fdn)
+        err = _load_live_mpls(ctx)
+        if err is not None:
+            return err
+        if tun.sdp_id in ctx.store.tunnels:
+            ctx.store.remove_tunnel(tun.sdp_id)
+            ctx.rebuild()
+    else:
+        ctx.store.remove_tunnel(tun.sdp_id)
+        ctx.rebuild()
+    _task(ctx, f"delete tunnel {tun.sdp_id}", tun.fdn or f"sdp:{tun.sdp_id}")
+    return Outcome(renderable=Text(f"eliminado túnel SDP {tun.sdp_id}", style="green"))
 
 
 def _alarm(ctx: Ctx, args: list[str]) -> Outcome:

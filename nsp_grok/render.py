@@ -872,6 +872,70 @@ def sdp_create_help() -> RenderableType:
     )
 
 
+def tunnel_create_help() -> RenderableType:
+    schema = Text.from_markup(
+        """\
+[bold cyan]svt.Manager[/]                      FDN [bold]serviceTunnel[/]
+        │
+        └── [bold cyan]svt.Tunnel[/]                 túnel SDP (unidireccional)
+                FDN  [bold]serviceTunnel:from-<srcIp>-id-<sdpId>[/]
+                sourceNodeId     = system IP del NE origen
+                farEndIpAddress  = system IP del NE destino
+                lspPointer       = LSP MPLS de origen→destino (opcional)
+                    │
+                    └── lo usa [bold]svt.SpokeSdpBinding[/] (sdpId)
+                            en el site del servicio
+"""
+    )
+    steps = Table(title="Comportamiento NFM-P al crear el túnel SDP", border_style="grey37")
+    steps.add_column("#", style="bold cyan", justify="right")
+    steps.add_column("qué hace")
+    for n, desc in [
+        (
+            "1",
+            "El túnel SDP (svt.Tunnel) es transporte entre dos NEs, independiente del "
+            "servicio. Es unidireccional: A→B no cubre B→A.",
+        ),
+        (
+            "2",
+            "Se crea bajo svt.Manager (FDN serviceTunnel), no bajo el servicio. "
+            "El binding del servicio apunta a este túnel con sdp=<id>.",
+        ),
+        (
+            "3",
+            "from= y to= son NEs distintos (system IP). Para MPLS, lsp= debe ser un "
+            "LSP que ya vaya de from a to.",
+        ),
+        (
+            "4",
+            "id= es el SDP id en el NE origen. Tiene que ser único en ese origen.",
+        ),
+    ]:
+        steps.add_row(n, desc)
+    uso = Table(title="Uso", border_style="grey37")
+    uso.add_column("comando", style="bold cyan")
+    uso.add_column("detalle")
+    for cmd, desc in [
+        (
+            "tunnel create from=<NE> to=<NE> id=<sdpId> [lsp=<nombre>] [sig=tldp]",
+            "pide confirmación",
+        ),
+        ("create tunnel from=NE to=NE id=N", "desde mpls/tunnels"),
+        ("tunnel shutdown|delete <id>", "piden confirmación"),
+        ("Tab", "completa NEs, LSPs from→to y sdp ids existentes"),
+    ]:
+        uso.add_row(cmd, desc)
+    nota = Text.from_markup(
+        "[dim]Orden de red: LSP (opcional) → túnel SDP → SDP binding en el site del servicio → SAP.[/]"
+    )
+    return Group(
+        Panel(schema, title="Create túnel SDP — jerarquía NFM-P", border_style="cyan"),
+        steps,
+        uso,
+        nota,
+    )
+
+
 def help_text() -> RenderableType:
     flow = Table(title="Shell  user@NSP  ·  anidado como Fire / SR OS", border_style="grey37")
     flow.add_column("escribís", style="bold cyan")
@@ -916,6 +980,7 @@ def help_text() -> RenderableType:
         ("/service create type=vprn|vpls|epipe id=N customer=C name=X", "crea servicio (pide confirmación)"),
         ("/sap create service=N site=NE port=P vlan=V [ip=a.b.c.d/p]", "crea SAP (pide confirmación)"),
         ("/sdp create service=N site=NE far=NE [sdp=id] [type=spoke|mesh]", "crea SDP binding (pide confirmación)"),
+        ("/tunnel create from=NE to=NE id=N [lsp=nombre]", "crea túnel SDP svt.Tunnel (pide confirmación)"),
         ("/service shutdown|turnup|delete <id>", "admin servicio (shutdown/delete piden confirmación)"),
         ("/sap shutdown|turnup|delete <nombre>", "admin SAP (shutdown/delete piden confirmación)"),
         ("/sdp shutdown|turnup|delete <sdp-id>", "admin SDP binding (shutdown/delete piden confirmación)"),
@@ -970,7 +1035,9 @@ def help_text() -> RenderableType:
     ]:
         ids.add_row(cmd, desc)
 
-    return Group(flow, nav, slash, related, ids, sap_create_help(), sdp_create_help())
+    return Group(
+        flow, nav, slash, related, ids, sap_create_help(), sdp_create_help(), tunnel_create_help()
+    )
 
 
 def _object_state(payload: Any) -> str:

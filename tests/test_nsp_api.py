@@ -17,6 +17,7 @@ from nsp_grok.nsp_api import (
     build_sdp_binding_admin_xml,
     build_sdp_binding_create_xml,
     build_alarm_action_xml,
+    build_tunnel_create_xml,
     build_delete_instance_xml,
     raise_if_xml_fault,
     _alarm_from_row,
@@ -934,3 +935,17 @@ def test_alarm_action_xml():
     clear = build_alarm_action_xml("faultManager:x&y", "clear")
     assert "fm.FaultManager.clearFault" in clear
     assert "&amp;" in clear
+
+
+def test_tunnel_create_xml():
+    xml = build_tunnel_create_xml(
+        101, "10.10.1.1", "10.10.2.1", name="sdp-ba-cba", lsp_fdn="lsp:from-10.10.1.1-id-1", signaling="tldp"
+    )
+    assert "<distinguishedName>serviceTunnel</distinguishedName>" in xml
+    assert "<svt.Tunnel>" in xml
+    assert "<id>101</id>" in xml
+    assert "<sourceNodeId>10.10.1.1</sourceNodeId>" in xml
+    assert "<farEndIpAddress>10.10.2.1</farEndIpAddress>" in xml
+    assert "<lspPointer>lsp:from-10.10.1.1-id-1</lspPointer>" in xml
+    xml2 = build_tunnel_create_xml(1, "10.0.0.1", "a&b")
+    assert "&amp;" in xml2

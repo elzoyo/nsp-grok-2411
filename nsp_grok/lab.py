@@ -903,6 +903,12 @@ class Store:
         for tun in tunnels:
             self.tunnels[tun.sdp_id] = tun
 
+    def add_tunnel(self, tun: ServiceTunnel) -> None:
+        self.tunnels[tun.sdp_id] = tun
+
+    def remove_tunnel(self, sdp_id: int) -> None:
+        self.tunnels.pop(sdp_id, None)
+
     def apply_lsps(self, lsps: list[Lsp]) -> None:
         for lsp in lsps:
             self.lsps[lsp.name] = lsp

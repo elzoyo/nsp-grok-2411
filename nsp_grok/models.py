@@ -131,6 +131,7 @@ class ServiceTunnel:
     admin: AdminState = "up"
     oper: OperState = "up"
     far_end: str = ""
+    fdn: str = ""
 
 
 @dataclass

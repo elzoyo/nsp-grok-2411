@@ -720,3 +720,81 @@ def test_live_alarm_ack_needs_fdn():
     out = dispatch(ctx, "alarm ack A-1001")
     assert "FDN" in out.error
     assert client.acked == []
+
+
+def test_tunnel_create_requires_confirm():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-ROSARIO-01 id=209 lsp=lsp-ba-ros",
+    )
+    assert "confirmación" in out.error
+
+
+def test_tunnel_create_lab():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-ROSARIO-01 id=209 lsp=lsp-ba-ros confirm=yes",
+    )
+    assert out.error == ""
+    tun = ctx.store.tunnels[209]
+    assert tun.from_ne == "PE-BAIRES-01"
+    assert tun.to_ne == "PE-ROSARIO-01"
+    assert tun.lsp == "lsp-ba-ros"
+    assert tun.far_end == "10.10.3.1"
+
+
+def test_tunnel_create_rejects_same_ne_and_wrong_lsp():
+    ctx = _admin_ctx()
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-BAIRES-01 id=250 confirm=yes",
+    )
+    assert "unidireccional" in out.error
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-CORDOBA-01 id=251 lsp=lsp-ba-ros confirm=yes",
+    )
+    assert "no va de" in out.error
+
+
+def test_tunnel_delete_lab():
+    ctx = _admin_ctx()
+    dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-ROSARIO-01 id=209 confirm=yes",
+    )
+    out = dispatch(ctx, "tunnel delete 209 confirm=yes")
+    assert out.error == ""
+    assert 209 not in ctx.store.tunnels
+
+
+class _LiveTunnelClient:
+    def __init__(self) -> None:
+        self.created: list[tuple] = []
+
+    def load_network_elements(self):
+        return {}
+
+    def load_mpls_inventory(self, nes):
+        return [], [], []
+
+    def create_tunnel(self, sdp_id, source_ip, far_end_ip, name="", lsp_fdn="", signaling=""):
+        self.created.append((sdp_id, source_ip, far_end_ip, name, lsp_fdn, signaling))
+
+
+def test_live_tunnel_create_posts_to_nsp():
+    ctx = _admin_ctx()
+    ctx.live = True
+    client = _LiveTunnelClient()
+    ctx.client = client
+    out = dispatch(
+        ctx,
+        "tunnel create from=PE-BAIRES-01 to=PE-CORDOBA-01 id=119 lsp=lsp-ba-cba confirm=yes",
+    )
+    assert out.error == ""
+    assert client.created
+    assert client.created[0][0] == 119
+    assert client.created[0][1] == "10.10.1.1"
+    assert client.created[0][2] == "10.10.2.1"

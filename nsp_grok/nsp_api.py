@@ -422,6 +422,63 @@ def build_sdp_binding_admin_xml(fdn: str, binding_type: str, admin: str) -> str:
     )
 
 
+def build_tunnel_create_xml(
+    sdp_id: int,
+    source_ip: str,
+    far_end_ip: str,
+    name: str = "",
+    lsp_fdn: str = "",
+    signaling: str = "",
+) -> str:
+    """configureChildInstance svt.Tunnel under svt.Manager (FDN serviceTunnel)."""
+    from xml.sax.saxutils import escape
+
+    extra = ""
+    if name:
+        extra += f"<displayedName>{escape(name)}</displayedName>"
+    if lsp_fdn:
+        extra += f"<lspPointer>{escape(lsp_fdn)}</lspPointer>"
+    if signaling:
+        extra += f"<signaling>{escape(signaling)}</signaling>"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureChildInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        "<distinguishedName>serviceTunnel</distinguishedName>"
+        "<childConfigInfo>"
+        "<svt.Tunnel>"
+        "<actionMask><bit>create</bit></actionMask>"
+        f"<id>{int(sdp_id)}</id>"
+        f"<sourceNodeId>{escape(source_ip)}</sourceNodeId>"
+        f"<farEndIpAddress>{escape(far_end_ip)}</farEndIpAddress>"
+        f"{extra}"
+        "</svt.Tunnel>"
+        "</childConfigInfo>"
+        "</generic.GenericObject.configureChildInstance>"
+    )
+
+
+def build_tunnel_admin_xml(fdn: str, admin: str) -> str:
+    from xml.sax.saxutils import escape
+
+    state = "down" if admin == "down" else "up"
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<generic.GenericObject.configureInstance xmlns="xmlapi_1.0">'
+        "<deployer>immediate</deployer>"
+        "<synchronousDeploy>true</synchronousDeploy>"
+        f"<distinguishedName>{escape(fdn)}</distinguishedName>"
+        "<configInfo>"
+        "<svt.Tunnel>"
+        "<actionMask><bit>modify</bit></actionMask>"
+        f"<administrativeState>{state}</administrativeState>"
+        "</svt.Tunnel>"
+        "</configInfo>"
+        "</generic.GenericObject.configureInstance>"
+    )
+
+
 def build_alarm_action_xml(fdn: str, action: str) -> str:
     """fm.FaultManager.acknowledgeFaultUsingDefaults or clearFault. Explicit write."""
     from xml.sax.saxutils import escape
@@ -1289,6 +1346,37 @@ class NspClient:
         self._post_xml(build_delete_instance_xml(fdn), "sdp delete")
         return fdn
 
+    def create_tunnel(
+        self,
+        sdp_id: int,
+        source_ip: str,
+        far_end_ip: str,
+        name: str = "",
+        lsp_fdn: str = "",
+        signaling: str = "",
+    ) -> None:
+        """Explicit write: configureChildInstance svt.Tunnel under serviceTunnel."""
+        if not source_ip or not far_end_ip:
+            raise NspApiError("tunnel create: from y to (system IP) son obligatorios")
+        if sdp_id <= 0:
+            raise NspApiError("tunnel create: id=<sdpId> es obligatorio")
+        self._post_xml(
+            build_tunnel_create_xml(sdp_id, source_ip, far_end_ip, name, lsp_fdn, signaling),
+            "tunnel create",
+        )
+
+    def configure_tunnel_admin(self, fdn: str, admin: str) -> str:
+        if not fdn:
+            raise NspApiError("hace falta el FDN del túnel (serviceTunnel:from-<ip>-id-<sdpId>)")
+        self._post_xml(build_tunnel_admin_xml(fdn, admin), "tunnel admin")
+        return fdn
+
+    def delete_tunnel(self, fdn: str) -> str:
+        if not fdn:
+            raise NspApiError("hace falta el FDN del túnel para borrar")
+        self._post_xml(build_delete_instance_xml(fdn), "tunnel delete")
+        return fdn
+
     def acknowledge_alarm(self, fdn: str) -> str:
         """fm.FaultManager.acknowledgeFaultUsingDefaults. Explicit write."""
         if not fdn:
@@ -1881,6 +1969,7 @@ def _tunnel_from_row(row: dict[str, Any], sdp_id: int) -> ServiceTunnel | None:
         admin=_state(row.get("administrativeState")),
         oper=_state(row.get("operationalState")),
         far_end=far,
+        fdn=str(row.get("objectFullName") or ""),
     )
 
 
